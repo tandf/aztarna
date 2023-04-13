@@ -39,41 +39,54 @@ class ROSScanner(RobotAdapter):
         """
         async with aiohttp.ClientSession(loop=asyncio.get_event_loop(), timeout=self.timeout) as client:
             full_host = 'http://' + str(address) + ':' + str(port)
-            ros_master_client = ServerProxy(full_host, loop=asyncio.get_event_loop(), client=client)
-            ros_host = ROSHost(address, port)
-            async with self.semaphore:
-                try:
-                    code, msg, val = await ros_master_client.getSystemState('')
-                    if code == 1:
-                        self.hosts.append(ros_host)
-                        if self.extended:
-                            publishers_array = val[0]
-                            subscribers_array = val[1]
-                            services_array = val[2]
-                            found_topics = await self.analyze_topic_types(ros_master_client)  # In order to analyze the nodes topics are needed
 
-                            self.extract_nodes(publishers_array, found_topics, 'pub', ros_host)
-                            self.extract_nodes(subscribers_array, found_topics, 'sub', ros_host)
-                            self.extract_services(services_array, ros_host)
+            # Send HTTP GET / request on port and check for error code 501
+            try:
+                async with client.get(full_host) as response:
+                    if (response.status == 501):
 
-                            for topic_name, topic_type in found_topics.items():  # key, value
-                                current_topic = Topic(topic_name, topic_type)
-                                comm = CommunicationROS(current_topic)
-                                for node in ros_host.nodes:
-                                    if next((x for x in node.published_topics if x.name == current_topic.name), None) is not None:
-                                        comm.publishers.append(node)
-                                    if next((x for x in node.subscribed_topics if x.name == current_topic.name), None) is not None:
-                                        comm.subscribers.append(node)
-                                ros_host.communications.append(comm)
-                            await self.set_xmlrpcuri_node(ros_master_client, ros_host)
-                        await client.close()
-                        self.logger.warning('[+] ROS Host found at {}:{}'.format(ros_host.address, ros_host.port))
+                        ros_master_client = ServerProxy(full_host, loop=asyncio.get_event_loop(), client=client)
+                        ros_host = ROSHost(address, port)
+                        async with self.semaphore:
+                            try:
+                                code, msg, val = await ros_master_client.getSystemState('')
+                                if code == 1:
+                                    self.hosts.append(ros_host)
+                                    if self.extended:
+                                        publishers_array = val[0]
+                                        subscribers_array = val[1]
+                                        services_array = val[2]
+                                        found_topics = await self.analyze_topic_types(ros_master_client)  # In order to analyze the nodes topics are needed
+
+                                        self.extract_nodes(publishers_array, found_topics, 'pub', ros_host)
+                                        self.extract_nodes(subscribers_array, found_topics, 'sub', ros_host)
+                                        self.extract_services(services_array, ros_host)
+
+                                        for topic_name, topic_type in found_topics.items():  # key, value
+                                            current_topic = Topic(topic_name, topic_type)
+                                            comm = CommunicationROS(current_topic)
+                                            for node in ros_host.nodes:
+                                                if next((x for x in node.published_topics if x.name == current_topic.name), None) is not None:
+                                                    comm.publishers.append(node)
+                                                if next((x for x in node.subscribed_topics if x.name == current_topic.name), None) is not None:
+                                                    comm.subscribers.append(node)
+                                            ros_host.communications.append(comm)
+                                        await self.set_xmlrpcuri_node(ros_master_client, ros_host)
+                                    await client.close()
+                                    self.logger.warning('[+] ROS Host found at {}:{}'.format(ros_host.address, ros_host.port))
+                                else:
+                                    self.logger.critical('[-] Error getting system state. Probably not a ROS Master')
+
+                            except Exception as e:
+                                # self.logger.error('[-] Error connecting to host ' + str(ros_host.address) + ':' + str(ros_host.port) + ' -> '+str(e) + '\n\tNot a ROS host')
+                                pass  # do not log anything to ensure a clean output
+                    
                     else:
-                        self.logger.critical('[-] Error getting system state. Probably not a ROS Master')
-
-                except Exception as e:
-                    # self.logger.error('[-] Error connecting to host ' + str(ros_host.address) + ':' + str(ros_host.port) + ' -> '+str(e) + '\n\tNot a ROS host')
-                    pass  # do not log anything to ensure a clean output
+                        print(f'Expected error code 501, but recieved {response.status}. Terminating scan of port')
+            except aiohttp.client_exceptions.ClientConnectorError as e:
+                print(f'Connection refused: {e}')
+            except Exception as e:
+                print(e)
 
     def extract_nodes(self, source_array, topics, pub_or_sub, host):
         """
