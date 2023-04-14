@@ -27,6 +27,7 @@ def main():
     parser.add_argument('-i', '--input_file', help='Input file of addresses to use for scanning')
     parser.add_argument('-o', '--out_file', help='Output file for the results')
     parser.add_argument('-e', '--extended', help='Extended scan of the hosts', action='store_true')
+    parser.add_argument('-b', '--bus', help='Get node transport/topic (bus) statistics and connection information (-e must also be selected)', action='store_true')
     parser.add_argument('-r', '--rate', help='Maximum simultaneous network connections', default=100, type=int)
     parser.add_argument('-d', '--domain', help='ROS 2 DOMAIN ID (ROS_DOMAIN_ID environmental variable). Only applies to ROS 2.', type=int)
     parser.add_argument('--daemon', help='Use rclpy daemon (coming from ros2cli).', action='store_true')
@@ -84,6 +85,7 @@ def main():
                     logger.error('[-] Error: ' + str(e))
 
         scanner.extended = args.extended
+        scanner.bus = args.bus
         scanner.rate = args.rate
         scanner.domain = args.domain
         if args.daemon is True:

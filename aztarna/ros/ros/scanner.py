@@ -80,13 +80,58 @@ class ROSScanner(RobotAdapter):
                             except Exception as e:
                                 # self.logger.error('[-] Error connecting to host ' + str(ros_host.address) + ':' + str(ros_host.port) + ' -> '+str(e) + '\n\tNot a ROS host')
                                 pass  # do not log anything to ensure a clean output
-                    
+
+                        # For each node found, extract transport/topic (bus) stats and connection info
+                        if self.bus:
+                            for host in self.hosts:
+                                for node in host.nodes:
+                                    await self.analyze_node_bus(node, node.address, node.port)
+
                     else:
-                        print(f'Expected error code 501, but recieved {response.status}. Terminating scan of port')
+                        print(f'Expected error code 501, but received {response.status}. Terminating scan of port')
+
             except aiohttp.client_exceptions.ClientConnectorError as e:
                 print(f'Connection refused: {e}')
             except Exception as e:
                 print(e)
+
+    async def analyze_node_bus(self, node, address, port):
+        """
+        For each node found, extract transport/topic (bus) stats and connection info.
+        """
+        async with aiohttp.ClientSession(loop=asyncio.get_event_loop(), timeout=self.timeout) as client:
+            xmlrpcuri = 'http://' + str(address) + ':' + str(port)
+            node_client = ServerProxy(xmlrpcuri, loop=asyncio.get_event_loop(), client=client)
+            async with self.semaphore:
+                try:
+                    response = await node_client.getBusStats('')
+                    if (len(response) == 3):
+                        code, msg, stats = response
+                        if code == 1:
+                            node.publish_stats, node.subscribe_stats, node.service_stats = stats
+                        else:
+                            print(f'Error: expected code 1 when getting bus stats but received code {code}')
+                    else:
+                        node.stats_unexpected = response
+
+                except Exception as e:
+                    print(e)
+
+                try:
+                    response = await node_client.getBusInfo('')
+                    if (len(response) == 3):
+                        code, msg, info = response
+                        if code == 1:
+                            node.connections = info
+                        else:
+                            print(f'Error: expected code 1 when getting bus info but received code {code}')
+                    else:
+                        node.info_unexpected = response
+
+                except Exception as e:
+                    print(e)
+
+                await client.close()
 
     def extract_nodes(self, source_array, topics, pub_or_sub, host):
         """
@@ -231,6 +276,54 @@ class ROSScanner(RobotAdapter):
                 for node in comm.subscribers:
                     print('\t\t\t' + str(node))
             print('\n\n')
+
+        if self.bus is True:
+            for host in self.hosts:
+                print('Node transport/topic (bus) statistics and connection information:')
+                for node in host.nodes:
+                    print('\n\tNode: ' + str(node))
+                    if (not (node.stats_unexpected)):
+                        print('\n\t\t Publish statistics:')
+                        for entry in node.publish_stats:
+                            print('\n\t\t\t * Topic name: ' + str(entry[0]))
+                            print('\t\t\t   Message data sent: ' + str(entry[1]))
+                            if (entry[2]):
+                                print('\t\t\t   Pub connection data: ')
+                                print('\t\t\t\t Connection ID: ' + str(entry[2][0][0]))
+                                print('\t\t\t\t Bytes sent: ' + str(entry[2][0][1]))
+                                print('\t\t\t\t Num sent: ' + str(entry[2][0][2]))
+                                print('\t\t\t\t Connected: ' + str(entry[2][0][3]))
+                        print('\n\t\t Subscribe statistics:')
+                        for entry in node.subscribe_stats:
+                            print('\n\t\t\t * Topic name: ' + str(entry[0]))
+                            print('\t\t\t   Sub connection data: ')
+                            if (entry[1]):
+                                print('\t\t\t\t Connection ID: ' + str(entry[1][0][0]))
+                                print('\t\t\t\t Bytes received: ' + str(entry[1][0][1]))
+                                print('\t\t\t\t Num received: ' + str(entry[1][0][2]))
+                                print('\t\t\t\t Drop estimate: ' + str(entry[1][0][3]))
+                                print('\t\t\t\t Connected: ' + str(entry[1][0][4]))
+                        print('\n\t\t Service statistics:')
+                        for entry in node.service_stats:
+                            print('\t\t\t * Num requests' + str(entry[0]))
+                            print('\t\t\t   Bytes received' + str(entry[1]))
+                            print('\t\t\t   Bytes sent' + str(entry[2]))
+                    else:
+                        print("\n\t\t Statistics didn't match ROS API format")
+                        print('\t\t\t Response from node: ' + str(node.stats_unexpected))
+                    if (not (node.info_unexpected)):
+                        print('\n\t\t Connection information:')
+                        for entry in node.connections:
+                            print('\n\t\t\t * Connection ID: ' + str(entry[0]))
+                            print('\t\t\t   Destination ID: ' + str(entry[1]))
+                            print('\t\t\t   Direction: ' + str(entry[2]))
+                            print('\t\t\t   Transport: ' + str(entry[3]))
+                            print('\t\t\t   Topic: ' + str(entry[4]))
+                            print('\t\t\t   Connected: ' + str(entry[5]))
+                    else:
+                        print("\n\t\t Connection information didn't match ROS API format")
+                        print('\t\t\t Response from node: ' + str(node.info_unexpected))
+                print('\n\n')
 
     def write_to_file(self, out_file):
         """
