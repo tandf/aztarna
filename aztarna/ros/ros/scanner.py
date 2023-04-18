@@ -89,12 +89,12 @@ class ROSScanner(RobotAdapter):
                                     await self.analyze_node_bus(node, node.address, node.port)
 
                     else:
-                        print(f'Expected error code 501, but received {response.status}. Terminating scan of port')
+                        self.logger.critical(f'[-] Expected error code 501, but received {response.status}. Terminating scan of port ({address}:{port})')
 
             except aiohttp.client_exceptions.ClientConnectorError as e:
-                print(f'Connection refused: {e}')
+                self.logger.error(f'[-] Connection refused: {e} ({address}:{port})')
             except Exception as e:
-                print(e)
+                self.logger.error(f'[-] Error when attempting to connect to potential host port: {e} ({address}:{port})')
 
     async def analyze_node_bus(self, node, address, port):
         """
@@ -111,12 +111,12 @@ class ROSScanner(RobotAdapter):
                         if code == 1:
                             node.publish_stats, node.subscribe_stats, node.service_stats = stats
                         else:
-                            print(f'Error: expected code 1 when getting bus stats but received code {code}')
+                            self.logger.critical(f'[-] Expected code 1 when getting bus stats but received code {code}. Terminating ({address}:{port})')
                     else:
                         node.stats_unexpected = response
 
                 except Exception as e:
-                    print(e)
+                    self.logger.error(f'[-] Error when attempting to get bus stats: {e} ({address}:{port})')
 
                 try:
                     response = await node_client.getBusInfo('')
@@ -125,12 +125,12 @@ class ROSScanner(RobotAdapter):
                         if code == 1:
                             node.connections = info
                         else:
-                            print(f'Error: expected code 1 when getting bus info but received code {code}')
+                            self.logger.critical(f'[-] Expected code 1 when getting bus info but received code {code}. Terminating ({address}:{port})')
                     else:
                         node.info_unexpected = response
 
                 except Exception as e:
-                    print(e)
+                    self.logger.error(f'[-] Error when attempting to get bus info: {e} ({address}:{port})')
 
                 await client.close()
 
