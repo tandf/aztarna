@@ -31,6 +31,19 @@ class ROSScanner(RobotAdapter):
 
         self.logger = logging.getLogger(__name__)
 
+        # information about failures
+        self.failed_501s = []
+        self.refused_connections = []
+        self.other_failed_connections = []
+        self.get_system_state_failures = []
+        self.host_failed_code1s = []
+
+        self.get_bus_stats_failures = []
+        self.bus_stats_failed_code1s = []
+
+        self.get_bus_info_failures = []
+        self.bus_info_failed_code1s = []
+
     async def analyze_nodes(self, address, port):
         """
         Scan a node and gather all its data including topics, services and Communications.
@@ -76,11 +89,15 @@ class ROSScanner(RobotAdapter):
                                     await client.close()
                                     self.logger.warning('[+] ROS Host found at {}:{}'.format(ros_host.address, ros_host.port))
                                 else:
+                                    if self.failures:
+                                        self.host_failed_code1s.append((address, port))
                                     self.logger.critical('[-] Error getting system state. Probably not a ROS Master')
 
                             except Exception as e:
+                                if self.failures:
+                                    self.get_system_state_failures.append((address, port))
                                 # self.logger.error('[-] Error connecting to host ' + str(ros_host.address) + ':' + str(ros_host.port) + ' -> '+str(e) + '\n\tNot a ROS host')
-                                pass  # do not log anything to ensure a clean output
+                                # pass  # do not log anything to ensure a clean output
 
                         # For each node found, extract transport/topic (bus) stats and connection info
                         if self.bus:
@@ -89,11 +106,17 @@ class ROSScanner(RobotAdapter):
                                     await self.analyze_node_bus(node, node.address, node.port)
 
                     else:
+                        if self.failures:
+                            self.failed_501s.append((address, port))
                         self.logger.critical(f'[-] Expected error code 501, but received {response.status}. Terminating scan of port ({address}:{port})')
 
             except aiohttp.client_exceptions.ClientConnectorError as e:
+                if self.failures:
+                    self.refused_connections.append((address, port, str(e)))
                 self.logger.error(f'[-] Connection refused: {e} ({address}:{port})')
             except Exception as e:
+                if self.failures:
+                    self.other_failed_connections.append((address, port, str(e)))
                 self.logger.error(f'[-] Error when attempting to connect to potential host port: {e} ({address}:{port})')
 
     async def analyze_node_bus(self, node, address, port):
@@ -111,11 +134,15 @@ class ROSScanner(RobotAdapter):
                         if code == 1:
                             node.publish_stats, node.subscribe_stats, node.service_stats = stats
                         else:
+                            if self.failures:
+                                self.bus_stats_failed_code1s.append(str(node))
                             self.logger.critical(f'[-] Expected code 1 when getting bus stats but received code {code}. Terminating ({address}:{port})')
                     else:
                         node.stats_unexpected = response
 
                 except Exception as e:
+                    if self.failures:
+                        self.get_bus_stats_failures.append(str(node))
                     self.logger.error(f'[-] Error when attempting to get bus stats: {e} ({address}:{port})')
 
                 try:
@@ -125,11 +152,15 @@ class ROSScanner(RobotAdapter):
                         if code == 1:
                             node.connections = info
                         else:
+                            if self.failures:
+                                self.bus_stats_failed_code1s.append(str(node))
                             self.logger.critical(f'[-] Expected code 1 when getting bus info but received code {code}. Terminating ({address}:{port})')
                     else:
                         node.info_unexpected = response
 
                 except Exception as e:
+                    if self.failures:
+                        self.get_bus_info_failures.append(str(node))
                     self.logger.error(f'[-] Error when attempting to get bus info: {e} ({address}:{port})')
 
                 await client.close()
@@ -278,8 +309,7 @@ class ROSScanner(RobotAdapter):
                     print('\t\t\t' + str(node), file=output_location)
             print('\n\n', file=output_location)
 
-        if self.bus is True:
-            for host in self.hosts:
+            if self.bus is True:
                 print('Node transport/topic (bus) statistics and connection information:', file=output_location)
                 for node in host.nodes:
                     print('\n\tNode: ' + str(node), file=output_location)
@@ -325,6 +355,47 @@ class ROSScanner(RobotAdapter):
                         print("\n\t\t Connection information didn't match ROS API format", file=output_location)
                         print('\t\t\t Response from node: ' + str(node.info_unexpected), file=output_location)
                 print('\n\n', file=output_location)
+
+        if self.failures is True:
+            print('Failures:', file=output_location)
+            if self.failed_501s:
+                print('\n\tCode returned not 501; Num: ' + str(len(self.failed_501s)), file=output_location)
+                for failure in self.failed_501s:
+                    print(f'\t\t - {failure[0]}:{failure[1]}', file=output_location)
+            if self.refused_connections:
+                print('\n\tConnection refused; Num: ' + str(len(self.refused_connections)), file=output_location)
+                for failure in self.refused_connections:
+                    print(f'\t\t - {failure[0]}:{failure[1]}: {failure[2]}', file=output_location)
+            if self.other_failed_connections:
+                print('\n\tConnection failed; Num: ' + str(len(self.other_failed_connections)), file=output_location)
+                for failure in self.other_failed_connections:
+                    print(f'\t\t - {failure[0]}:{failure[1]}: {failure[2]}', file=output_location)
+            if self.get_system_state_failures:
+                print('\n\tgetSystemState failure; Num: ' + str(len(self.get_system_state_failures)), file=output_location)
+                for failure in self.get_system_state_failures:
+                    print(f'\t\t - {failure[0]}:{failure[1]}', file=output_location)
+            if self.host_failed_code1s:
+                print('\n\tgetSystemState code returned not 1; Num: ' + str(len(self.host_failed_code1s)), file=output_location)
+                for failure in self.host_failed_code1s:
+                    print(f'\t\t - {failure[0]}:{failure[1]}', file=output_location)
+
+            if self.get_bus_stats_failures:
+                print('\n\tgetBusStats failure; Num: ' + str(len(self.get_bus_stats_failures)), file=output_location)
+                for failure in self.get_bus_stats_failures:
+                    print(f'\t\t - Node: {failure}', file=output_location)
+            if self.bus_stats_failed_code1s:
+                print('\n\tgetBusStats code returned not 1; Num: ' + str(len(self.bus_stats_failed_code1s)), file=output_location)
+                for failure in self.bus_stats_failed_code1s:
+                    print(f'\t\t - Node: {failure}', file=output_location)
+            if self.get_bus_info_failures:
+                print('\n\tgetBusInfo failure; Num: ' + str(len(self.get_bus_info_failures)), file=output_location)
+                for failure in self.get_bus_info_failures:
+                    print(f'\t\t - Node: {failure}', file=output_location)
+            if self.bus_info_failed_code1s:
+                print('\n\tgetBusInfo code returned not 1; Num: ' + str(len(self.bus_info_failed_code1s)), file=output_location)
+                for failure in self.bus_info_failed_code1s:
+                    print(f'\t\t - Node: {failure}', file=output_location)
+            print('\n\n', file=output_location)
 
     def log_to_file(self):
         """

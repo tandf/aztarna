@@ -12,11 +12,13 @@ class RobotAdapter:
     """
     BaseScanner class, an abstraction for different type scans
     """
-    def __init__(self, ports=[80], extended=False, bus=False):
+    def __init__(self, ports=[80], extended=False, bus=False, log=False, failures=False):
         self.host_list = []
         self.ports = ports
         self.extended = extended
         self.bus = bus
+        self.log = log
+        self.failures = failures
         self.input = False
         self._rate = 1000
         self.semaphore = asyncio.Semaphore(self._rate)
