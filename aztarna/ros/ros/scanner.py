@@ -17,6 +17,7 @@ from aztarna.ros.ros.helpers import Node, Topic, Service
 from aztarna.ros.ros.helpers import ROSHost
 import sys
 from ipaddress import IPv4Address
+import datetime
 
 class ROSScanner(RobotAdapter):
     """
@@ -247,83 +248,90 @@ class ROSScanner(RobotAdapter):
     def scan_pipe_main(self):
         asyncio.get_event_loop().run_until_complete(self.scan_pipe())
 
-    def print_results(self):
+    def print_results(self, output_location=sys.stdout):
         """
         Print the information of a ROS system.
         """
         for host in self.hosts:
             for node in host.nodes:
-                print('\nNode: ' + str(node))
-                print('\n\t Published topics:')
+                print('\nNode: ' + str(node), file=output_location)
+                print('\n\t Published topics:', file=output_location)
                 for topic in node.published_topics:
-                    print('\t\t * ' + str(topic))
-                print('\n\t Subscribed topics:')
+                    print('\t\t * ' + str(topic), file=output_location)
+                print('\n\t Subscribed topics:', file=output_location)
                 for topic in node.subscribed_topics:
-                    print('\t\t * ' + str(topic))
-                print('\n\t Services:')
+                    print('\t\t * ' + str(topic), file=output_location)
+                print('\n\t Services:', file=output_location)
                 for service in node.services:
-                    print('\t\t * ' + str(service))
+                    print('\t\t * ' + str(service), file=output_location)
 
-            print('\nCommunications: ')
+            print('\nCommunications: ', file=output_location)
             for i in range(len(host.communications)):
                 comm = host.communications[i]
-                print('\n\t Communication ' + str(i) + ':')
-                print('\t\t - Publishers:')
+                print('\n\t Communication ' + str(i) + ':', file=output_location)
+                print('\t\t - Publishers:', file=output_location)
                 for node in comm.publishers:
-                    print('\t\t\t' + str(node))
-                print('\t\t - Topic: ' + str(comm.topic))
-                print('\t\t - Subscribers:')
+                    print('\t\t\t' + str(node), file=output_location)
+                print('\t\t - Topic: ' + str(comm.topic), file=output_location)
+                print('\t\t - Subscribers:', file=output_location)
                 for node in comm.subscribers:
-                    print('\t\t\t' + str(node))
-            print('\n\n')
+                    print('\t\t\t' + str(node), file=output_location)
+            print('\n\n', file=output_location)
 
         if self.bus is True:
             for host in self.hosts:
-                print('Node transport/topic (bus) statistics and connection information:')
+                print('Node transport/topic (bus) statistics and connection information:', file=output_location)
                 for node in host.nodes:
-                    print('\n\tNode: ' + str(node))
+                    print('\n\tNode: ' + str(node), file=output_location)
                     if (not (node.stats_unexpected)):
-                        print('\n\t\t Publish statistics:')
+                        print('\n\t\t Publish statistics:', file=output_location)
                         for entry in node.publish_stats:
-                            print('\n\t\t\t * Topic name: ' + str(entry[0]))
-                            print('\t\t\t   Message data sent: ' + str(entry[1]))
+                            print('\n\t\t\t * Topic name: ' + str(entry[0]), file=output_location)
+                            print('\t\t\t   Message data sent: ' + str(entry[1]), file=output_location)
                             if (entry[2]):
-                                print('\t\t\t   Pub connection data: ')
-                                print('\t\t\t\t Connection ID: ' + str(entry[2][0][0]))
-                                print('\t\t\t\t Bytes sent: ' + str(entry[2][0][1]))
-                                print('\t\t\t\t Num sent: ' + str(entry[2][0][2]))
-                                print('\t\t\t\t Connected: ' + str(entry[2][0][3]))
-                        print('\n\t\t Subscribe statistics:')
+                                print('\t\t\t   Pub connection data: ', file=output_location)
+                                print('\t\t\t\t Connection ID: ' + str(entry[2][0][0]), file=output_location)
+                                print('\t\t\t\t Bytes sent: ' + str(entry[2][0][1]), file=output_location)
+                                print('\t\t\t\t Num sent: ' + str(entry[2][0][2]), file=output_location)
+                                print('\t\t\t\t Connected: ' + str(entry[2][0][3]), file=output_location)
+                        print('\n\t\t Subscribe statistics:', file=output_location)
                         for entry in node.subscribe_stats:
-                            print('\n\t\t\t * Topic name: ' + str(entry[0]))
-                            print('\t\t\t   Sub connection data: ')
+                            print('\n\t\t\t * Topic name: ' + str(entry[0]), file=output_location)
+                            print('\t\t\t   Sub connection data: ', file=output_location)
                             if (entry[1]):
-                                print('\t\t\t\t Connection ID: ' + str(entry[1][0][0]))
-                                print('\t\t\t\t Bytes received: ' + str(entry[1][0][1]))
-                                print('\t\t\t\t Num received: ' + str(entry[1][0][2]))
-                                print('\t\t\t\t Drop estimate: ' + str(entry[1][0][3]))
-                                print('\t\t\t\t Connected: ' + str(entry[1][0][4]))
-                        print('\n\t\t Service statistics:')
+                                print('\t\t\t\t Connection ID: ' + str(entry[1][0][0]), file=output_location)
+                                print('\t\t\t\t Bytes received: ' + str(entry[1][0][1]), file=output_location)
+                                print('\t\t\t\t Num received: ' + str(entry[1][0][2]), file=output_location)
+                                print('\t\t\t\t Drop estimate: ' + str(entry[1][0][3]), file=output_location)
+                                print('\t\t\t\t Connected: ' + str(entry[1][0][4]), file=output_location)
+                        print('\n\t\t Service statistics:', file=output_location)
                         for entry in node.service_stats:
-                            print('\t\t\t * Num requests' + str(entry[0]))
-                            print('\t\t\t   Bytes received' + str(entry[1]))
-                            print('\t\t\t   Bytes sent' + str(entry[2]))
+                            print('\t\t\t * Num requests' + str(entry[0]), file=output_location)
+                            print('\t\t\t   Bytes received' + str(entry[1]), file=output_location)
+                            print('\t\t\t   Bytes sent' + str(entry[2]), file=output_location)
                     else:
-                        print("\n\t\t Statistics didn't match ROS API format")
-                        print('\t\t\t Response from node: ' + str(node.stats_unexpected))
+                        print("\n\t\t Statistics didn't match ROS API format", file=output_location)
+                        print('\t\t\t Response from node: ' + str(node.stats_unexpected), file=output_location)
                     if (not (node.info_unexpected)):
-                        print('\n\t\t Connection information:')
+                        print('\n\t\t Connection information:', file=output_location)
                         for entry in node.connections:
-                            print('\n\t\t\t * Connection ID: ' + str(entry[0]))
-                            print('\t\t\t   Destination ID: ' + str(entry[1]))
-                            print('\t\t\t   Direction: ' + str(entry[2]))
-                            print('\t\t\t   Transport: ' + str(entry[3]))
-                            print('\t\t\t   Topic: ' + str(entry[4]))
-                            print('\t\t\t   Connected: ' + str(entry[5]))
+                            print('\n\t\t\t * Connection ID: ' + str(entry[0]), file=output_location)
+                            print('\t\t\t   Destination ID: ' + str(entry[1]), file=output_location)
+                            print('\t\t\t   Direction: ' + str(entry[2]), file=output_location)
+                            print('\t\t\t   Transport: ' + str(entry[3]), file=output_location)
+                            print('\t\t\t   Topic: ' + str(entry[4]), file=output_location)
+                            print('\t\t\t   Connected: ' + str(entry[5]), file=output_location)
                     else:
-                        print("\n\t\t Connection information didn't match ROS API format")
-                        print('\t\t\t Response from node: ' + str(node.info_unexpected))
-                print('\n\n')
+                        print("\n\t\t Connection information didn't match ROS API format", file=output_location)
+                        print('\t\t\t Response from node: ' + str(node.info_unexpected), file=output_location)
+                print('\n\n', file=output_location)
+
+    def log_to_file(self):
+        """
+        Log ROS system information, including console output, to a new file with unique filename.
+        """
+        with open(datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f') + '.log', 'x') as file:
+            self.print_results(file)
 
     def write_to_file(self, out_file):
         """
