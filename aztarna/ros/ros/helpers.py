@@ -37,7 +37,7 @@ class Node(BaseNodeROS):
         # transport/topic (bus) stats and connection info
         self.publish_stats = []
         self.subscribe_stats = []
-        self.service_stats = []
+        self.service_stats = {}
         self.connections = []
 
         self.stats_unexpected = []

@@ -129,17 +129,47 @@ class ROSScanner(RobotAdapter):
             async with self.semaphore:
                 try:
                     response = await node_client.getBusStats('')
-                    if (len(response) == 3):
+                    try:
                         code, msg, stats = response
                         if code == 1:
-                            node.publish_stats, node.subscribe_stats, node.service_stats = stats
+                            publish_stats, subscribe_stats, service_stats = stats
+                            for entry in publish_stats:
+                                publish_stats_entry = {}
+                                publish_stats_entry['topicName'] = entry[0]
+                                publish_stats_entry['messageDataSent'] = entry[1]
+                                publish_stats_entry['pubConnectionData'] = {}
+                                if entry[2]:
+                                    publish_stats_entry['pubConnectionData']['connectionId'] =  entry[2][0][0]
+                                    publish_stats_entry['pubConnectionData']['bytesSent'] = entry[2][0][1]
+                                    publish_stats_entry['pubConnectionData']['numSent'] = entry[2][0][2]
+                                    publish_stats_entry['pubConnectionData']['connected'] = entry[2][0][3]
+                                node.publish_stats.append(publish_stats_entry)
+                            for entry in subscribe_stats:
+                                subscribe_stats_entry = {}
+                                subscribe_stats_entry['topicName'] = entry[0]
+                                subscribe_stats_entry['subConnectionData'] = {}
+                                if entry[1]:
+                                    subscribe_stats_entry['subConnectionData']['connectionId'] = entry[1][0][0]
+                                    subscribe_stats_entry['subConnectionData']['bytesReceived'] = entry[1][0][1]
+                                    subscribe_stats_entry['subConnectionData']['numReceived'] = entry[1][0][2]
+                                    subscribe_stats_entry['subConnectionData']['dropEstimate'] = entry[1][0][3]
+                                    subscribe_stats_entry['subConnectionData']['connected'] = entry[1][0][4]
+                                node.subscribe_stats.append(subscribe_stats_entry)
+                            if service_stats:
+                                node.service_stats['numRequests'] = service_stats[0]
+                                node.service_stats['bytesReceived'] = service_stats[1]
+                                node.service_stats['bytesSent'] = service_stats[2]
+
                         else:
                             if self.failures:
                                 self.bus_stats_failed_code1s.append(str(node))
                             self.logger.critical(f'[-] Expected code 1 when getting bus stats but received code {code}. Terminating ({address}:{port})')
-                    else:
+                    except Exception as e:
                         node.stats_unexpected = response
-
+                        node.publish_stats = []
+                        node.subscribe_stats = []
+                        node.service_stats = []
+                        self.logger.error(f'[-] Bus stats response in unexpected format: {e} ({address}:{port})')
                 except Exception as e:
                     if self.failures:
                         self.get_bus_stats_failures.append(str(node))
@@ -147,17 +177,27 @@ class ROSScanner(RobotAdapter):
 
                 try:
                     response = await node_client.getBusInfo('')
-                    if (len(response) == 3):
+                    try:
                         code, msg, info = response
                         if code == 1:
-                            node.connections = info
+                            for entry in info:
+                                connection_entry = {}
+                                connection_entry['connectionId'] = entry[0]
+                                connection_entry['destinationId'] = entry[1]
+                                connection_entry['direction'] = entry[2]
+                                connection_entry['transport'] = entry[3]
+                                connection_entry['topic'] = entry[4]
+                                connection_entry['connected'] = entry[5]
+                                node.connections.append(connection_entry)
+
                         else:
                             if self.failures:
                                 self.bus_stats_failed_code1s.append(str(node))
                             self.logger.critical(f'[-] Expected code 1 when getting bus info but received code {code}. Terminating ({address}:{port})')
-                    else:
+                    except Exception as e:
                         node.info_unexpected = response
-
+                        node.connections = []
+                        self.logger.error(f'[-] Bus (connection) info response in unexpected format: {e} ({address}:{port})')
                 except Exception as e:
                     if self.failures:
                         self.get_bus_info_failures.append(str(node))
@@ -316,41 +356,41 @@ class ROSScanner(RobotAdapter):
                     if (not (node.stats_unexpected)):
                         print('\n\t\t Publish statistics:', file=output_location)
                         for entry in node.publish_stats:
-                            print('\n\t\t\t * Topic name: ' + str(entry[0]), file=output_location)
-                            print('\t\t\t   Message data sent: ' + str(entry[1]), file=output_location)
-                            if (entry[2]):
+                            print('\n\t\t\t * Topic name: ' + str(entry['topicName']), file=output_location)
+                            print('\t\t\t   Message data sent: ' + str(entry['messageDataSent']), file=output_location)
+                            if (entry['pubConnectionData']):
                                 print('\t\t\t   Pub connection data: ', file=output_location)
-                                print('\t\t\t\t Connection ID: ' + str(entry[2][0][0]), file=output_location)
-                                print('\t\t\t\t Bytes sent: ' + str(entry[2][0][1]), file=output_location)
-                                print('\t\t\t\t Num sent: ' + str(entry[2][0][2]), file=output_location)
-                                print('\t\t\t\t Connected: ' + str(entry[2][0][3]), file=output_location)
+                                print('\t\t\t\t Connection ID: ' + str(entry['pubConnectionData']['connectionId']), file=output_location)
+                                print('\t\t\t\t Bytes sent: ' + str(entry['pubConnectionData']['bytesSent']), file=output_location)
+                                print('\t\t\t\t Num sent: ' + str(entry['pubConnectionData']['numSent']), file=output_location)
+                                print('\t\t\t\t Connected: ' + str(entry['pubConnectionData']['connected']), file=output_location)
                         print('\n\t\t Subscribe statistics:', file=output_location)
                         for entry in node.subscribe_stats:
-                            print('\n\t\t\t * Topic name: ' + str(entry[0]), file=output_location)
+                            print('\n\t\t\t * Topic name: ' + str(entry['topicName']), file=output_location)
                             print('\t\t\t   Sub connection data: ', file=output_location)
-                            if (entry[1]):
-                                print('\t\t\t\t Connection ID: ' + str(entry[1][0][0]), file=output_location)
-                                print('\t\t\t\t Bytes received: ' + str(entry[1][0][1]), file=output_location)
-                                print('\t\t\t\t Num received: ' + str(entry[1][0][2]), file=output_location)
-                                print('\t\t\t\t Drop estimate: ' + str(entry[1][0][3]), file=output_location)
-                                print('\t\t\t\t Connected: ' + str(entry[1][0][4]), file=output_location)
+                            if (entry['subConnectionData']):
+                                print('\t\t\t\t Connection ID: ' + str(entry['subConnectionData']['connectionId']), file=output_location)
+                                print('\t\t\t\t Bytes received: ' + str(entry['subConnectionData']['bytesReceived']), file=output_location)
+                                print('\t\t\t\t Num received: ' + str(entry['subConnectionData']['numReceived']), file=output_location)
+                                print('\t\t\t\t Drop estimate: ' + str(entry['subConnectionData']['dropEstimate']), file=output_location)
+                                print('\t\t\t\t Connected: ' + str(entry['subConnectionData']['connected']), file=output_location)
                         print('\n\t\t Service statistics:', file=output_location)
-                        for entry in node.service_stats:
-                            print('\t\t\t * Num requests' + str(entry[0]), file=output_location)
-                            print('\t\t\t   Bytes received' + str(entry[1]), file=output_location)
-                            print('\t\t\t   Bytes sent' + str(entry[2]), file=output_location)
+                        if node.service_stats:
+                            print('\t\t\t * Num requests' + str(node.service_stats['numRequests']), file=output_location)
+                            print('\t\t\t   Bytes received' + str(node.service_stats['bytesReceived']), file=output_location)
+                            print('\t\t\t   Bytes sent' + str(node.service_stats['bytesSent']), file=output_location)
                     else:
                         print("\n\t\t Statistics didn't match ROS API format", file=output_location)
                         print('\t\t\t Response from node: ' + str(node.stats_unexpected), file=output_location)
                     if (not (node.info_unexpected)):
                         print('\n\t\t Connection information:', file=output_location)
                         for entry in node.connections:
-                            print('\n\t\t\t * Connection ID: ' + str(entry[0]), file=output_location)
-                            print('\t\t\t   Destination ID: ' + str(entry[1]), file=output_location)
-                            print('\t\t\t   Direction: ' + str(entry[2]), file=output_location)
-                            print('\t\t\t   Transport: ' + str(entry[3]), file=output_location)
-                            print('\t\t\t   Topic: ' + str(entry[4]), file=output_location)
-                            print('\t\t\t   Connected: ' + str(entry[5]), file=output_location)
+                            print('\n\t\t\t * Connection ID: ' + str(entry['connectionId']), file=output_location)
+                            print('\t\t\t   Destination ID: ' + str(entry['destinationId']), file=output_location)
+                            print('\t\t\t   Direction: ' + str(entry['direction']), file=output_location)
+                            print('\t\t\t   Transport: ' + str(entry['transport']), file=output_location)
+                            print('\t\t\t   Topic: ' + str(entry['topic']), file=output_location)
+                            print('\t\t\t   Connected: ' + str(entry['connected']), file=output_location)
                     else:
                         print("\n\t\t Connection information didn't match ROS API format", file=output_location)
                         print('\t\t\t Response from node: ' + str(node.info_unexpected), file=output_location)
