@@ -40,8 +40,11 @@ class Node(BaseNodeROS):
         self.service_stats = {}
         self.connections = []
 
-        self.stats_unexpected = []
-        self.info_unexpected = []
+        self.get_bus_stats_response = []
+        self.get_bus_info_response = []
+
+        self.stats_unexpected = False
+        self.info_unexpected = False
 
     def __str__(self):
         return '{} XMLRPCUri: http://{}:{}'.format(self.name, self.address, self.port)

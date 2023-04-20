@@ -18,6 +18,9 @@ from aztarna.ros.ros.helpers import ROSHost
 import sys
 from ipaddress import IPv4Address
 import datetime
+import json
+import yaml
+import copy
 
 class ROSScanner(RobotAdapter):
     """
@@ -89,12 +92,12 @@ class ROSScanner(RobotAdapter):
                                     self.logger.warning('[+] ROS Host found at {}:{}'.format(ros_host.address, ros_host.port))
                                 else:
                                     if self.failures:
-                                        self.host_failed_code1s.append((address, port))
+                                        self.host_failed_code1s.append((str(address), port))
                                     self.logger.critical(f'[-] Expected code 1 when getting system state but received code {code}. Terminating ({address}:{port})')
 
                             except Exception as e:
                                 if self.failures:
-                                    self.get_system_state_failures.append((address, port, str(e)))
+                                    self.get_system_state_failures.append((str(address), port, str(e)))
                                 self.logger.error(f'[-] Error getting system state: {e} ({address}:{port})')
 
                         # For each node found, extract transport/topic (bus) stats and connection info
@@ -105,12 +108,12 @@ class ROSScanner(RobotAdapter):
 
                     else:
                         if self.failures:
-                            self.failed_501s.append((address, port))
+                            self.failed_501s.append((str(address), port))
                         self.logger.critical(f'[-] Expected error code 501, but received {response.status}. Terminating scan of port ({address}:{port})')
 
             except Exception as e:
                 if self.failures:
-                    self.failed_connections.append((address, port, str(e)))
+                    self.failed_connections.append((str(address), port, str(e)))
                 self.logger.error(f'[-] Error when attempting to connect to potential host port: {e} ({address}:{port})')
 
     async def analyze_node_bus(self, node, address, port):
@@ -123,6 +126,7 @@ class ROSScanner(RobotAdapter):
             async with self.semaphore:
                 try:
                     response = await node_client.getBusStats('')
+                    node.get_bus_stats_response = response
                     try:
                         code, msg, stats = response
                         if code == 1:
@@ -159,7 +163,7 @@ class ROSScanner(RobotAdapter):
                                 self.bus_stats_failed_code1s.append(str(node))
                             self.logger.critical(f'[-] Expected code 1 when getting bus stats but received code {code}. Terminating ({address}:{port})')
                     except Exception as e:
-                        node.stats_unexpected = response
+                        node.stats_unexpected = True
                         node.publish_stats = []
                         node.subscribe_stats = []
                         node.service_stats = []
@@ -171,6 +175,7 @@ class ROSScanner(RobotAdapter):
 
                 try:
                     response = await node_client.getBusInfo('')
+                    node.get_bus_info_response = response
                     try:
                         code, msg, info = response
                         if code == 1:
@@ -189,7 +194,7 @@ class ROSScanner(RobotAdapter):
                                 self.bus_stats_failed_code1s.append(str(node))
                             self.logger.critical(f'[-] Expected code 1 when getting bus info but received code {code}. Terminating ({address}:{port})')
                     except Exception as e:
-                        node.info_unexpected = response
+                        node.info_unexpected = True
                         node.connections = []
                         self.logger.warning(f'[-] Bus (connection) info response in unexpected format: {e} ({address}:{port})')
                 except Exception as e:
@@ -374,8 +379,8 @@ class ROSScanner(RobotAdapter):
                             print('\t\t\t   Bytes received' + str(node.service_stats['bytesReceived']), file=output_location)
                             print('\t\t\t   Bytes sent' + str(node.service_stats['bytesSent']), file=output_location)
                     else:
-                        print("\n\t\t Statistics didn't match ROS API format", file=output_location)
-                        print('\t\t\t Response from node: ' + str(node.stats_unexpected), file=output_location)
+                        print("\n\t\t Statistics don't match ROS API format", file=output_location)
+                        print('\t\t\t Response from node: ' + str(node.get_bus_stats_response), file=output_location)
                     if (not (node.info_unexpected)):
                         print('\n\t\t Connection information:', file=output_location)
                         for entry in node.connections:
@@ -386,8 +391,8 @@ class ROSScanner(RobotAdapter):
                             print('\t\t\t   Topic: ' + str(entry['topic']), file=output_location)
                             print('\t\t\t   Connected: ' + str(entry['connected']), file=output_location)
                     else:
-                        print("\n\t\t Connection information didn't match ROS API format", file=output_location)
-                        print('\t\t\t Response from node: ' + str(node.info_unexpected), file=output_location)
+                        print("\n\t\t Connection information does't match ROS API format", file=output_location)
+                        print('\t\t\t Response from node: ' + str(node.get_bus_info_response), file=output_location)
                 print('\n\n', file=output_location)
 
         if self.failures is True:
@@ -427,12 +432,42 @@ class ROSScanner(RobotAdapter):
                     print(f'\t\t - Node: {failure}', file=output_location)
             print('\n\n', file=output_location)
 
-    def save_to_file(self):
+    def save_to_file(self, format):
         """
         Save ROS system information, including console output, to a new file with unique filename.
         """
-        with open(datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f') + '.log', 'x') as file:
-            self.print_results(file)
+        datetime_now = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
+        if (('output' in format) or ('all' in format)):
+            with open(f'{datetime_now}.log', 'x') as file:
+                self.print_results(file)
+        if (('json' in format ) or ('JSON' in format) or ('yaml' in format) or ('YAML' in format) or ('all' in format)):
+            save_dict = {
+                'nodes': {},
+                'failures': {
+                    'failed_501s': self.failed_501s,
+                    'failed_connections': self.failed_connections,
+                    'get_system_state_failures': self.get_system_state_failures,
+                    'host_failed_code1s': self.host_failed_code1s,
+                    'get_bus_stats_failures': self.get_bus_stats_failures,
+                    'bus_stats_failed_code1s': self.bus_stats_failed_code1s,
+                    'get_bus_info_failures': self.get_bus_info_failures,
+                    'bus_info_failed_code1s': self.bus_info_failed_code1s
+                }
+            }
+            for host in self.hosts:
+                for node in host.nodes:
+                    node_dict = copy.deepcopy(node.__dict__)
+                    node_dict['published_topics'] = [str(topic) for topic in node_dict['published_topics']]
+                    node_dict['subscribed_topics'] = [str(topic) for topic in node_dict['subscribed_topics']]
+                    node_dict['services'] = [str(service) for service in node_dict['services']]
+                    save_dict['nodes'][node.name] = node_dict
+
+            if (('json' in format) or ('JSON' in format) or ('all' in format)):
+                with open(f'{datetime_now}.json', 'x') as file:
+                    json.dump(save_dict, file, indent=4)
+            if (('yaml' in format) or ('YAML' in format) or ('all' in format)):
+                with open(f'{datetime_now}.yaml', 'x') as file:
+                    file.write(yaml.dump(save_dict))
 
     def write_to_file(self, out_file):
         """
