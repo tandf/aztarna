@@ -427,9 +427,9 @@ class ROSScanner(RobotAdapter):
                     print(f'\t\t - Node: {failure}', file=output_location)
             print('\n\n', file=output_location)
 
-    def log_to_file(self):
+    def save_to_file(self):
         """
-        Log ROS system information, including console output, to a new file with unique filename.
+        Save ROS system information, including console output, to a new file with unique filename.
         """
         with open(datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f') + '.log', 'x') as file:
             self.print_results(file)

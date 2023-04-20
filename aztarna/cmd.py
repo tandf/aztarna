@@ -28,7 +28,7 @@ def main():
     parser.add_argument('-o', '--out_file', help='Output file for the results')
     parser.add_argument('-e', '--extended', help='Extended scan of the hosts', action='store_true')
     parser.add_argument('-b', '--bus', help='Get node transport/topic (bus) statistics and connection information (-e must also be selected)', action='store_true')
-    parser.add_argument('-l', '--log', help='Write output information to a new file with unique filename', action='store_true')
+    parser.add_argument('-s', '--save', help='Save output information to a new file with unique filename', action='store_true')
     parser.add_argument('-f', '--failures', help='Keep track of information about failures', action='store_true')
     parser.add_argument('-r', '--rate', help='Maximum simultaneous network connections', default=100, type=int)
     parser.add_argument('-d', '--domain', help='ROS 2 DOMAIN ID (ROS_DOMAIN_ID environmental variable). Only applies to ROS 2.', type=int)
@@ -88,7 +88,7 @@ def main():
 
         scanner.extended = args.extended
         scanner.bus = args.bus
-        scanner.log = args.log
+        scanner.save = args.save
         scanner.failures = args.failures
         scanner.rate = args.rate
         scanner.domain = args.domain
@@ -103,8 +103,8 @@ def main():
         if args.out_file:
             scanner.write_to_file(args.out_file)
         else:
-            if args.log is True:
-                scanner.log_to_file()
+            if args.save is True:
+                scanner.save_to_file()
             elif args.extended is True:
                 scanner.print_results()
     except Exception as e:
