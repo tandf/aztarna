@@ -18,6 +18,7 @@ from aztarna.ros.ros.helpers import ROSHost
 import sys
 from ipaddress import IPv4Address
 import datetime
+import uuid
 import json
 import yaml
 import copy
@@ -437,8 +438,9 @@ class ROSScanner(RobotAdapter):
         Save ROS system information, including console output, to a new file with unique filename.
         """
         datetime_now = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
+        uuid4 = uuid.uuid4().hex
         if (('output' in format) or ('all' in format)):
-            with open(f'{datetime_now}.log', 'x') as file:
+            with open(f'{datetime_now}_{uuid4}.log', 'x') as file:
                 self.print_results(file)
         if (('json' in format ) or ('JSON' in format) or ('yaml' in format) or ('YAML' in format) or ('all' in format)):
             save_dict = {
@@ -463,10 +465,10 @@ class ROSScanner(RobotAdapter):
                     save_dict['nodes'][node.name] = node_dict
 
             if (('json' in format) or ('JSON' in format) or ('all' in format)):
-                with open(f'{datetime_now}.json', 'x') as file:
+                with open(f'{datetime_now}_{uuid4}.json', 'x') as file:
                     json.dump(save_dict, file, indent=4)
             if (('yaml' in format) or ('YAML' in format) or ('all' in format)):
-                with open(f'{datetime_now}.yaml', 'x') as file:
+                with open(f'{datetime_now}_{uuid4}.yaml', 'x') as file:
                     file.write(yaml.dump(save_dict))
 
     def write_to_file(self, out_file):
