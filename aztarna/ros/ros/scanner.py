@@ -180,14 +180,14 @@ class ROSScanner(RobotAdapter):
                     try:
                         code, msg, info = response
                         if code == 1:
-                            for entry in info:
+                            for i, entry in enumerate(info, start=1):
                                 connection_entry = {}
-                                connection_entry['connectionId'] = entry[0]
-                                connection_entry['destinationId'] = entry[1]
-                                connection_entry['direction'] = entry[2]
-                                connection_entry['transport'] = entry[3]
-                                connection_entry['topic'] = entry[4]
-                                connection_entry['connected'] = entry[5]
+                                connection_entry[f'connectionId{i}'] = entry[0]
+                                connection_entry[f'destinationId{i}'] = entry[1]
+                                connection_entry[f'direction{i}'] = entry[2]
+                                connection_entry[f'transport{i}'] = entry[3]
+                                connection_entry[f'topic{i}'] = entry[4]
+                                connection_entry[f'connected{i}'] = entry[5]
                                 node.connections.append(connection_entry)
 
                         else:
@@ -384,13 +384,13 @@ class ROSScanner(RobotAdapter):
                         print('\t\t\t Response from node: ' + str(node.get_bus_stats_response), file=output_location)
                     if (not (node.info_unexpected)):
                         print('\n\t\t Connection information:', file=output_location)
-                        for entry in node.connections:
-                            print('\n\t\t\t * Connection ID: ' + str(entry['connectionId']), file=output_location)
-                            print('\t\t\t   Destination ID: ' + str(entry['destinationId']), file=output_location)
-                            print('\t\t\t   Direction: ' + str(entry['direction']), file=output_location)
-                            print('\t\t\t   Transport: ' + str(entry['transport']), file=output_location)
-                            print('\t\t\t   Topic: ' + str(entry['topic']), file=output_location)
-                            print('\t\t\t   Connected: ' + str(entry['connected']), file=output_location)
+                        for i in range(1, len(node.connections)+1):
+                            print('\n\t\t\t * Connection ID: ' + str(node.connections[i-1][f'connectionId{i}']), file=output_location)
+                            print('\t\t\t   Destination ID: ' + str(node.connections[i-1][f'destinationId{i}']), file=output_location)
+                            print('\t\t\t   Direction: ' + str(node.connections[i-1][f'direction{i}']), file=output_location)
+                            print('\t\t\t   Transport: ' + str(node.connections[i-1][f'transport{i}']), file=output_location)
+                            print('\t\t\t   Topic: ' + str(node.connections[i-1][f'topic{i}']), file=output_location)
+                            print('\t\t\t   Connected: ' + str(node.connections[i-1][f'connected{i}']), file=output_location)
                     else:
                         print("\n\t\t Connection information does't match ROS API format", file=output_location)
                         print('\t\t\t Response from node: ' + str(node.get_bus_info_response), file=output_location)
