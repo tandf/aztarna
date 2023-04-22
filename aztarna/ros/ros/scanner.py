@@ -35,21 +35,22 @@ class ROSScanner(RobotAdapter):
 
         self.logger = logging.getLogger(__name__)
 
-        # information about failures
-        self.failed_501s = []
-        self.host_timeout_failures = []
-        self.failed_connections = []
-        self.get_system_state_timeout_failures = []
-        self.get_system_state_failures = []
-        self.host_failed_code1s = []
+        self.failure_info = {
+            'failed_501s': [],
+            'host_timeout_failures': [],
+            'failed_connections': [],
+            'get_system_state_timeouts': [],
+            'get_system_state_failures': [],
+            'host_failed_code1s': [],
 
-        self.get_bus_stats_timeout_failures = []
-        self.get_bus_stats_failures = []
-        self.bus_stats_failed_code1s = []
+            'get_bus_stats_timeouts': [],
+            'get_bus_stats_failures': [],
+            'bus_stats_failed_code1s': [],
 
-        self.get_bus_info_timeout_failures = []
-        self.get_bus_info_failures = []
-        self.bus_info_failed_code1s = []
+            'get_bus_info_timeouts': [],
+            'get_bus_info_failures': [],
+            'bus_info_failed_code1s': []
+        }
 
     async def analyze_nodes(self, address, port):
         """
@@ -96,16 +97,16 @@ class ROSScanner(RobotAdapter):
                                     self.logger.warning('[+] ROS Host found at {}:{}'.format(ros_host.address, ros_host.port))
                                 else:
                                     if self.failures:
-                                        self.host_failed_code1s.append((str(address), port))
+                                        self.failure_info['host_failed_code1s'].append((str(address), port))
                                     self.logger.critical(f'[-] Expected code 1 when getting system state but received code {code}. Terminating ({address}:{port})')
 
                             except asyncio.TimeoutError:
                                 if self.failures:
-                                    self.get_system_state_timeout_failures.append((str(address), port))
+                                    self.failure_info['get_system_state_timeouts'].append((str(address), port))
                                 self.logger.error(f'[-] Timed out while attempting to get system state')
                             except Exception as e:
                                 if self.failures:
-                                    self.get_system_state_failures.append((str(address), port, str(e)))
+                                    self.failure_info['get_system_state_failures'].append((str(address), port, str(e)))
                                 self.logger.error(f'[-] Error getting system state: {e} ({address}:{port})')
 
                         # For each node found, extract transport/topic (bus) stats and connection info
@@ -116,16 +117,16 @@ class ROSScanner(RobotAdapter):
 
                     else:
                         if self.failures:
-                            self.failed_501s.append((str(address), port, response.status))
+                            self.failure_info['failed_501s'].append((str(address), port, response.status))
                         self.logger.critical(f'[-] Expected error code 501, but received {response.status}. Terminating scan of port ({address}:{port})')
 
             except asyncio.TimeoutError:
                 if self.failures:
-                    self.host_timeout_failures.append((str(address), port))
+                    self.failure_info['host_timeout_failures'].append((str(address), port))
                 self.logger.error(f'[-] Timed out while attempting to connect to potential host port')
             except Exception as e:
                 if self.failures:
-                    self.failed_connections.append((str(address), port, str(e)))
+                    self.failure_info['failed_connections'].append((str(address), port, str(e)))
                 self.logger.error(f'[-] Error when attempting to connect to potential host port: {e} ({address}:{port})')
 
     async def analyze_node_bus(self, node, address, port):
@@ -171,7 +172,7 @@ class ROSScanner(RobotAdapter):
                                 node.service_stats['bytesSent'] = service_stats[2]
                         else:
                             if self.failures:
-                                self.bus_stats_failed_code1s.append(str(node))
+                                self.failure_info['bus_stats_failed_code1s'].append(str(node))
                             self.logger.critical(f'[-] Expected code 1 when getting bus stats but received code {code}. Terminating ({address}:{port})')
                     except Exception as e:
                         node.stats_unexpected = True
@@ -182,11 +183,11 @@ class ROSScanner(RobotAdapter):
 
                 except asyncio.TimeoutError:
                     if self.failures:
-                        self.get_bus_stats_timeout_failures.append((str(address), port))
+                        self.failure_info['get_bus_stats_timeouts'].append((str(address), port))
                     self.logger.error(f'[-] Timed out while attempting to get bus stats')
                 except Exception as e:
                     if self.failures:
-                        self.get_bus_stats_failures.append((str(node), str(e)))
+                        self.failure_info['get_bus_stats_failures'].append((str(node), str(e)))
                     self.logger.error(f'[-] Error when attempting to get bus stats: {e} ({address}:{port})')
 
                 try:
@@ -206,7 +207,7 @@ class ROSScanner(RobotAdapter):
                                 node.connections.append(connection_entry)
                         else:
                             if self.failures:
-                                self.bus_stats_failed_code1s.append(str(node))
+                                self.failure_info['bus_info_failed_code1s'].append(str(node))
                             self.logger.critical(f'[-] Expected code 1 when getting bus info but received code {code}. Terminating ({address}:{port})')
                     except Exception as e:
                         node.info_unexpected = True
@@ -215,11 +216,11 @@ class ROSScanner(RobotAdapter):
 
                 except asyncio.TimeoutError:
                     if self.failures:
-                        self.get_bus_info_timeout_failures.append((str(address), port))
+                        self.failure_info['get_bus_info_timeouts'].append((str(address), port))
                     self.logger.error(f'[-] Timed out while attempting to get bus info')
                 except Exception as e:
                     if self.failures:
-                        self.get_bus_info_failures.append((str(node), str(e)))
+                        self.failure_info['get_bus_info_failures'].append((str(node), str(e)))
                     self.logger.error(f'[-] Error when attempting to get bus info: {e} ({address}:{port})')
 
                 await client.close()
@@ -417,54 +418,54 @@ class ROSScanner(RobotAdapter):
 
         if self.failures is True:
             print('\nFailures:', file=output_location)
-            if self.failed_501s:
-                print('\n\tCode returned not 501; Num: ' + str(len(self.failed_501s)), file=output_location)
-                for failure in self.failed_501s:
+            if self.failure_info['failed_501s']:
+                print('\n\tCode returned not 501; Num: ' + str(len(self.failure_info['failed_501s'])), file=output_location)
+                for failure in self.failure_info['failed_501s']:
                     print(f'\t\t - {failure[0]}:{failure[1]}: returned {failure[2]}', file=output_location)
-            if self.host_timeout_failures:
-                print('\n\tTimed out while attempting to connect to host; Num: ' + str(len(self.host_timeout_failures)), file=output_location)
-                for failure in self.host_timeout_failures:
+            if self.failure_info['host_timeout_failures']:
+                print('\n\tTimed out while attempting to connect to host; Num: ' + str(len(self.failure_info['host_timeout_failures'])), file=output_location)
+                for failure in self.failure_info['host_timeout_failures']:
                     print(f'\t\t - {failure[0]}:{failure[1]}', file=output_location)
-            if self.failed_connections:
-                print('\n\tConnection failed; Num: ' + str(len(self.failed_connections)), file=output_location)
-                for failure in self.failed_connections:
+            if self.failure_info['failed_connections']:
+                print('\n\tConnection failed; Num: ' + str(len(self.failure_info['failed_connections'])), file=output_location)
+                for failure in self.failure_info['failed_connections']:
                     print(f'\t\t - {failure[0]}:{failure[1]}: {failure[2]}', file=output_location)
-            if self.get_system_state_timeout_failures:
-                print('\n\tgetSystemState timeout; Num: ' + str(len(self.get_system_state_timeout_failures)), file=output_location)
-                for failure in self.get_system_state_timeout_failures:
+            if self.failure_info['get_system_state_timeouts']:
+                print('\n\tgetSystemState timeout; Num: ' + str(len(self.failure_info['get_system_state_timeouts'])), file=output_location)
+                for failure in self.failure_info['get_system_state_timeouts']:
                     print(f'\t\t - {failure[0]}:{failure[1]}', file=output_location)
-            if self.get_system_state_failures:
-                print('\n\tgetSystemState failure; Num: ' + str(len(self.get_system_state_failures)), file=output_location)
-                for failure in self.get_system_state_failures:
+            if self.failure_info['get_system_state_failures']:
+                print('\n\tgetSystemState failure; Num: ' + str(len(self.failure_info['get_system_state_failures'])), file=output_location)
+                for failure in self.failure_info['get_system_state_failures']:
                     print(f'\t\t - {failure[0]}:{failure[1]}: {failure[2]}', file=output_location)
-            if self.host_failed_code1s:
-                print('\n\tgetSystemState code returned not 1; Num: ' + str(len(self.host_failed_code1s)), file=output_location)
-                for failure in self.host_failed_code1s:
+            if self.failure_info['host_failed_code1s']:
+                print('\n\tgetSystemState code returned not 1; Num: ' + str(len(self.failure_info['host_failed_code1s'])), file=output_location)
+                for failure in self.failure_info['host_failed_code1s']:
                     print(f'\t\t - {failure[0]}:{failure[1]}', file=output_location)
 
-            if self.get_bus_stats_timeout_failures:
-                print('\n\tgetBusStats timeout; Num: ' + str(len(self.get_bus_stats_timeout_failures)), file=output_location)
-                for failure in self.get_bus_stats_timeout_failures:
+            if self.failure_info['get_bus_stats_timeouts']:
+                print('\n\tgetBusStats timeout; Num: ' + str(len(self.failure_info['get_bus_stats_timeouts'])), file=output_location)
+                for failure in self.failure_info['get_bus_stats_timeouts']:
                     print(f'\t\t - {failure[0]}:{failure[1]}', file=output_location)
-            if self.get_bus_stats_failures:
-                print('\n\tgetBusStats failure; Num: ' + str(len(self.get_bus_stats_failures)), file=output_location)
-                for failure in self.get_bus_stats_failures:
+            if self.failure_info['get_bus_stats_failures']:
+                print('\n\tgetBusStats failure; Num: ' + str(len(self.failure_info['get_bus_stats_failures'])), file=output_location)
+                for failure in self.failure_info['get_bus_stats_failures']:
                     print(f'\t\t - Node: {failure[0]}: {failure[1]}', file=output_location)
-            if self.bus_stats_failed_code1s:
-                print('\n\tgetBusStats code returned not 1; Num: ' + str(len(self.bus_stats_failed_code1s)), file=output_location)
-                for failure in self.bus_stats_failed_code1s:
+            if self.failure_info['bus_stats_failed_code1s']:
+                print('\n\tgetBusStats code returned not 1; Num: ' + str(len(self.failure_info['bus_stats_failed_code1s'])), file=output_location)
+                for failure in self.failure_info['bus_stats_failed_code1s']:
                     print(f'\t\t - Node: {failure}', file=output_location)
-            if self.get_bus_info_timeout_failures:
-                print('\n\tgetBusInfo timeout; Num: ' + str(len(self.get_bus_info_timeout_failures)), file=output_location)
-                for failure in self.get_bus_info_timeout_failures:
+            if self.failure_info['get_bus_info_timeouts']:
+                print('\n\tgetBusInfo timeout; Num: ' + str(len(self.failure_info['get_bus_info_timeouts'])), file=output_location)
+                for failure in self.failure_info['get_bus_info_timeouts']:
                     print(f'\t\t - {failure[0]}:{failure[1]}', file=output_location)
-            if self.get_bus_info_failures:
-                print('\n\tgetBusInfo failure; Num: ' + str(len(self.get_bus_info_failures)), file=output_location)
-                for failure in self.get_bus_info_failures:
+            if self.failure_info['get_bus_info_failures']:
+                print('\n\tgetBusInfo failure; Num: ' + str(len(self.failure_info['get_bus_info_failures'])), file=output_location)
+                for failure in self.failure_info['get_bus_info_failures']:
                     print(f'\t\t - Node: {failure[0]}: {failure[1]}', file=output_location)
-            if self.bus_info_failed_code1s:
-                print('\n\tgetBusInfo code returned not 1; Num: ' + str(len(self.bus_info_failed_code1s)), file=output_location)
-                for failure in self.bus_info_failed_code1s:
+            if self.failure_info['bus_info_failed_code1s']:
+                print('\n\tgetBusInfo code returned not 1; Num: ' + str(len(self.failure_info['bus_info_failed_code1s'])), file=output_location)
+                for failure in self.failure_info['bus_info_failed_code1s']:
                     print(f'\t\t - Node: {failure}', file=output_location)
             print('\n\n', file=output_location)
 
@@ -480,20 +481,7 @@ class ROSScanner(RobotAdapter):
         if (('json' in format ) or ('JSON' in format) or ('yaml' in format) or ('YAML' in format) or ('all' in format)):
             save_dict = {
                 'nodes': {},
-                'failures': {
-                    'failed_501s': self.failed_501s,
-                    'host_timeout_failures': self.host_timeout_failures,
-                    'failed_connections': self.failed_connections,
-                    'get_system_state_timeout_failures': self.get_system_state_timeout_failures,
-                    'get_system_state_failures': self.get_system_state_failures,
-                    'host_failed_code1s': self.host_failed_code1s,
-                    'get_bus_stats_timeout_failures': self.get_bus_stats_timeout_failures,
-                    'get_bus_stats_failures': self.get_bus_stats_failures,
-                    'bus_stats_failed_code1s': self.bus_stats_failed_code1s,
-                    'get_bus_info_timeout_failures': self.get_bus_info_timeout_failures,
-                    'get_bus_info_failures': self.get_bus_info_failures,
-                    'bus_info_failed_code1s': self.bus_info_failed_code1s
-                }
+                'failure_info': self.failure_info
             }
             for host in self.hosts:
                 for node in host.nodes:
