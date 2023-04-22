@@ -70,8 +70,7 @@ def main():
             scanner.load_range(args.address)
         else:
             if args.type.upper() not in ['ROS2']:
-                scanner.scan_pipe_main()
-                return
+                pipe = True
 
 
         # TODO Implement a regex for port argument
@@ -104,7 +103,11 @@ def main():
             scanner.hidden = True
         if args.passive is True:
             scanner.passive = True
-        scanner.scan()
+
+        if pipe:
+            scanner.scan_pipe_main()
+        else:
+            scanner.scan()
 
         if args.out_file:
             scanner.write_to_file(args.out_file)
