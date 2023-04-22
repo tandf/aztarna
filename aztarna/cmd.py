@@ -30,6 +30,7 @@ def main():
     parser.add_argument('-b', '--bus', help='Get node transport/topic (bus) statistics and connection information (-e must also be selected)', action='store_true')
     parser.add_argument('-f', '--failures', help='Keep track of information about failures', action='store_true')
     parser.add_argument('-s', '--save', help='Save ROS system information to a new file with unique filename (specify format to save information: output, JSON, YAML, or all; if multiple but not all, separate with commas)', default='none')
+    parser.add_argument('-w', '--when', help='When to create output files, only at the end (default) or after every scanned potential host port: (end, every)', default='end')
     parser.add_argument('-r', '--rate', help='Maximum simultaneous network connections', default=100, type=int)
     parser.add_argument('-d', '--domain', help='ROS 2 DOMAIN ID (ROS_DOMAIN_ID environmental variable). Only applies to ROS 2.', type=int)
     parser.add_argument('--daemon', help='Use rclpy daemon (coming from ros2cli).', action='store_true')
@@ -86,15 +87,21 @@ def main():
                     logger.error('[-] Error: ' + str(e))
 
 
-        save_format = args.save.split(',')
-        for entry in save_format:
+        scanner.save_format = args.save.split(',')
+        for entry in scanner.save_format:
             if (entry not in ['none', 'output', 'json', 'JSON', 'yaml', 'YAML', 'all']):
                 logger.critical('Invalid save format selected')
                 return
+        if ((scanner.when == 'end') or (scanner.when == 'every')):
+            scanner.when = args.when
+        else:
+            logger.critical('Invalid "when" option selected')
+            return
 
         scanner.extended = args.extended
         scanner.bus = args.bus
         scanner.failures = args.failures
+        scanner.out_file = args.out_file
         scanner.rate = args.rate
         scanner.domain = args.domain
         if args.daemon is True:
@@ -109,13 +116,15 @@ def main():
         else:
             scanner.scan()
 
-        if args.out_file:
-            scanner.write_to_file(args.out_file)
-        else:
-            if ('none' not in save_format):
-                scanner.save_to_file(save_format)
-            elif args.extended is True:
-                scanner.print_results()
+        if (args.when == 'end'):
+            if args.out_file:
+                scanner.write_to_file(args.out_file)
+            else:
+                if ('none' not in scanner.save_format):
+                    scanner.save_to_file(scanner.save_format)
+                elif args.extended is True:
+                    scanner.print_results()
+
     except Exception as e:
         logger.critical('Exception occurred during execution')
         raise e

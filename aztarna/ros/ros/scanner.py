@@ -65,6 +65,7 @@ class ROSScanner(RobotAdapter):
             # Send HTTP GET / request on port and check for error code 501
             try:
                 async with client.get(full_host) as response:
+
                     if (response.status == 501):
                         ros_master_client = ServerProxy(full_host, loop=asyncio.get_event_loop(), client=client)
                         ros_host = ROSHost(address, port)
@@ -129,6 +130,19 @@ class ROSScanner(RobotAdapter):
                     self.failure_info['failed_connections'].append((str(address), port, str(e)))
                 self.logger.error(f'[-] Error when attempting to connect to potential host port: {e} ({address}:{port})')
 
+        if (self.when == 'every'):
+            if self.out_file:
+                self.write_to_file(self.out_file)
+            else:
+                if ('none' not in self.save_format):
+                    self.save_to_file(self.save_format)
+                elif self.extended is True:
+                    self.print_results()
+
+            self.hosts.clear()
+            for key in self.failure_info.keys():
+                self.failure_info[key].clear()
+
     async def analyze_node_bus(self, node, address, port):
         """
         For each node found, extract transport/topic (bus) stats and connection info.
@@ -176,9 +190,9 @@ class ROSScanner(RobotAdapter):
                             self.logger.critical(f'[-] Expected code 1 when getting bus stats but received code {code}. Terminating ({address}:{port})')
                     except Exception as e:
                         node.stats_unexpected = True
-                        node.publish_stats = []
-                        node.subscribe_stats = []
-                        node.service_stats = []
+                        node.publish_stats.clear()
+                        node.subscribe_stats.clear()
+                        node.service_stats.clear()
                         self.logger.warning(f'[-] Bus stats response in unexpected format: {e} ({address}:{port})')
 
                 except asyncio.TimeoutError:
@@ -211,7 +225,7 @@ class ROSScanner(RobotAdapter):
                             self.logger.critical(f'[-] Expected code 1 when getting bus info but received code {code}. Terminating ({address}:{port})')
                     except Exception as e:
                         node.info_unexpected = True
-                        node.connections = []
+                        node.connections.clear()
                         self.logger.warning(f'[-] Bus (connection) info response in unexpected format: {e} ({address}:{port})')
 
                 except asyncio.TimeoutError:
@@ -518,5 +532,5 @@ class ROSScanner(RobotAdapter):
                                                                    stopic, service)
             lines.append(line)
 
-        with open(out_file, 'w') as file:
+        with open(out_file, 'a') as file:
             file.writelines(lines)
