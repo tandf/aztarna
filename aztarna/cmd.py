@@ -62,6 +62,7 @@ def main():
         else:
             logger.critical('Invalid type selected')
             return
+        pipe = False
         if args.input_file:
             try:
                 scanner.load_from_file(args.input_file)
