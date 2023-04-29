@@ -58,6 +58,64 @@ class ROSScanner(RobotAdapter):
             'bus_info_failed_code1s': []
         }
 
+    async def check_high_numbered_port(self, address, port):
+        """
+        Perform a TCP SYN scan on a high-numbered, normally closed port to check if address may repsond to any port.
+        """
+        scapy.conf.verb = 0
+        ping = scapy.sr1(scapy.IP(dst=str(address))/scapy.ICMP(), timeout=0.5)
+        if ((ping != None) or (ping[scapy.ICMP].type != 3)):
+            high_numbered_port = 58243
+            source_port = scapy.RandShort()
+            response_packet = scapy.sr1(scapy.IP(dst=str(address))/scapy.TCP(sport=source_port, dport=high_numbered_port, flags='S'), retry=1, timeout=0.5)
+            if ((response_packet == None) or (response_packet[scapy.TCP].flags != 0x12)):
+                if (response_packet != None):
+                    scapy.send(scapy.IP(dst=str(address))/scapy.TCP(sport=source_port, dport=high_numbered_port, flags='R'))
+                return 1
+            elif (response_packet[scapy.TCP].flags == 0x12):
+                scapy.send(scapy.IP(dst=str(address))/scapy.TCP(sport=source_port, dport=high_numbered_port, flags='R'))
+                if self.failures:
+                    self.failures_info['responses_from_high_numbered_port'].append((str(address), port, high_numbered_port))
+                self.logger.error(f'[-] Received response from high-numbered normally-closed port {high_numbered_port}; may respond to any port ({address}:{port})')
+                return 0
+        elif (ping[scapy.ICMP].type == 3):
+            if self.failures:
+                self.failure_info['icmp_unreachable'].append((str(address), port, ping[scapy.ICMP].type, ping[scapy.ICMP].code))
+            logger_str = f'[-] ICMP unreachable error: type={ping[scapy.ICMP].type}, code={ping[scapy.ICMP].code}'
+            if (ping[scapy.ICMP].code in [1, 2, 3, 9, 10, 13]):
+                logger_str += '; likely filtered'
+            self.logger.error(logger_str)
+            return 0
+        elif (ping == None):
+            if self.failures:
+                self.failure_info['failed_pings'].append((str(address), port))
+            self.logger.error(f'[-] No response when attempting to ping address ({address}:{port})')
+            return 0
+
+    async def check_error_code(self, full_host, client, address, port):
+        """
+        Send an HTTP GET / request to the specified port and check for error code 501.
+        """
+        try:
+            async with client.get(full_host) as response:
+                if (response.status == 501):
+                    return 1
+                else:
+                    if self.failures:
+                        self.failure_info['failed_501s'].append((str(address), port, response.status))
+                    self.logger.critical(f'[-] Expected error code 501, but received {response.status}. Terminating scan of port ({address}:{port})')
+                    return 0
+        except asyncio.TimeoutError:
+            if self.failures:
+                self.failure_info['host_timeout_failures'].append((str(address), port))
+            self.logger.error(f'[-] Timed out while attempting to connect to potential host port')
+            return 0
+        except Exception as e:
+            if self.failures:
+                self.failure_info['failed_connections'].append((str(address), port, str(e)))
+            self.logger.error(f'[-] Error when attempting to connect to potential host port: {e} ({address}:{port})')
+            return 0
+
     async def analyze_nodes(self, address, port):
         """
         Scan a node and gather all its data including topics, services and Communications.
@@ -68,103 +126,59 @@ class ROSScanner(RobotAdapter):
         async with aiohttp.ClientSession(loop=asyncio.get_event_loop(), timeout=self.timeout) as client:
             full_host = 'http://' + str(address) + ':' + str(port)
 
-            scapy.conf.verb = 0
-            ping = scapy.sr1(scapy.IP(dst=str(address))/scapy.ICMP(), timeout=0.5)
-            if ((ping != None) or (not ((ping[scapy.ICMP].type == 3) and ping[scapy.ICMP].code in [1, 2, 3, 9, 10, 13]))):
+            # Perform a TCP SYN scan on a high-numbered, normally closed port to check if address may repsond to any port.
+            if await self.check_high_numbered_port(address, port) == 1:
+                # Try HTTP GET / request on port and check for error code 501
+                if await self.check_error_code(full_host, client, address, port) == 1:
 
-                # Try TCP SYN scan on high-numbered normally closed port to see if address may respond to any port
-                high_numbered_port = 58243
-                source_port = scapy.RandShort()
-                response_packet = scapy.sr1(scapy.IP(dst=str(address))/scapy.TCP(sport=source_port, dport=high_numbered_port, flags='S'), retry=1, timeout=0.5)
-                if ((response_packet == None) or (response_packet[scapy.TCP].flags != 0x12)):
-                    if (response_packet != None):
-                        scapy.send(scapy.IP(dst=str(address))/scapy.TCP(sport=source_port, dport=high_numbered_port, flags='R'))
+                    ros_master_client = ServerProxy(full_host, loop=asyncio.get_event_loop(), client=client)
+                    ros_host = ROSHost(address, port)
+                    async with self.semaphore:
+                        try:
+                            code, msg, val = await ros_master_client.getSystemState('')
+                            if code == 1:
+                                self.hosts.append(ros_host)
+                                if self.extended:
+                                    publishers_array = val[0]
+                                    subscribers_array = val[1]
+                                    services_array = val[2]
+                                    found_topics = await self.analyze_topic_types(ros_master_client)  # In order to analyze the nodes topics are needed
 
-                    # Send HTTP GET / request on port and check for error code 501
-                    try:
-                        async with client.get(full_host) as response:
+                                    self.extract_nodes(publishers_array, found_topics, 'pub', ros_host)
+                                    self.extract_nodes(subscribers_array, found_topics, 'sub', ros_host)
+                                    self.extract_services(services_array, ros_host)
 
-                            if (response.status == 501):
-                                ros_master_client = ServerProxy(full_host, loop=asyncio.get_event_loop(), client=client)
-                                ros_host = ROSHost(address, port)
-                                async with self.semaphore:
-                                    try:
-                                        code, msg, val = await ros_master_client.getSystemState('')
-                                        if code == 1:
-                                            self.hosts.append(ros_host)
-                                            if self.extended:
-                                                publishers_array = val[0]
-                                                subscribers_array = val[1]
-                                                services_array = val[2]
-                                                found_topics = await self.analyze_topic_types(ros_master_client)  # In order to analyze the nodes topics are needed
-
-                                                self.extract_nodes(publishers_array, found_topics, 'pub', ros_host)
-                                                self.extract_nodes(subscribers_array, found_topics, 'sub', ros_host)
-                                                self.extract_services(services_array, ros_host)
-
-                                                for topic_name, topic_type in found_topics.items():  # key, value
-                                                    current_topic = Topic(topic_name, topic_type)
-                                                    comm = CommunicationROS(current_topic)
-                                                    for node in ros_host.nodes:
-                                                        if next((x for x in node.published_topics if x.name == current_topic.name), None) is not None:
-                                                            comm.publishers.append(node)
-                                                        if next((x for x in node.subscribed_topics if x.name == current_topic.name), None) is not None:
-                                                            comm.subscribers.append(node)
-                                                    ros_host.communications.append(comm)
-                                                await self.set_xmlrpcuri_node(ros_master_client, ros_host)
-                                            await client.close()
-                                            self.logger.warning('[+] ROS Host found at {}:{}'.format(ros_host.address, ros_host.port))
-                                        else:
-                                            if self.failures:
-                                                self.failure_info['host_failed_code1s'].append((str(address), port))
-                                            self.logger.critical(f'[-] Expected code 1 when getting system state but received code {code}. Terminating ({address}:{port})')
-
-                                    except asyncio.TimeoutError:
-                                        if self.failures:
-                                            self.failure_info['get_system_state_timeouts'].append((str(address), port))
-                                        self.logger.error(f'[-] Timed out while attempting to get system state')
-                                    except Exception as e:
-                                        if self.failures:
-                                            self.failure_info['get_system_state_failures'].append((str(address), port, str(e)))
-                                        self.logger.error(f'[-] Error getting system state: {e} ({address}:{port})')
-
-                                # For each node found, extract transport/topic (bus) stats and connection info
-                                if self.bus:
-                                    for host in self.hosts:
-                                        for node in host.nodes:
-                                            await self.analyze_node_bus(node, node.address, node.port)
-
+                                    for topic_name, topic_type in found_topics.items():  # key, value
+                                        current_topic = Topic(topic_name, topic_type)
+                                        comm = CommunicationROS(current_topic)
+                                        for node in ros_host.nodes:
+                                            if next((x for x in node.published_topics if x.name == current_topic.name), None) is not None:
+                                                comm.publishers.append(node)
+                                            if next((x for x in node.subscribed_topics if x.name == current_topic.name), None) is not None:
+                                                comm.subscribers.append(node)
+                                        ros_host.communications.append(comm)
+                                    await self.set_xmlrpcuri_node(ros_master_client, ros_host)
+                                await client.close()
+                                self.logger.warning('[+] ROS Host found at {}:{}'.format(ros_host.address, ros_host.port))
                             else:
                                 if self.failures:
-                                    self.failure_info['failed_501s'].append((str(address), port, response.status))
-                                self.logger.critical(f'[-] Expected error code 501, but received {response.status}. Terminating scan of port ({address}:{port})')
+                                    self.failure_info['host_failed_code1s'].append((str(address), port))
+                                self.logger.critical(f'[-] Expected code 1 when getting system state but received code {code}. Terminating ({address}:{port})')
 
-                    except asyncio.TimeoutError:
-                        if self.failures:
-                            self.failure_info['host_timeout_failures'].append((str(address), port))
-                        self.logger.error(f'[-] Timed out while attempting to connect to potential host port')
-                    except Exception as e:
-                        if self.failures:
-                            self.failure_info['failed_connections'].append((str(address), port, str(e)))
-                        self.logger.error(f'[-] Error when attempting to connect to potential host port: {e} ({address}:{port})')
+                        except asyncio.TimeoutError:
+                            if self.failures:
+                                self.failure_info['get_system_state_timeouts'].append((str(address), port))
+                            self.logger.error(f'[-] Timed out while attempting to get system state')
+                        except Exception as e:
+                            if self.failures:
+                                self.failure_info['get_system_state_failures'].append((str(address), port, str(e)))
+                            self.logger.error(f'[-] Error getting system state: {e} ({address}:{port})')
 
-                elif (response_packet[scapy.TCP].flags == 0x12):
-                    scapy.send(scapy.IP(dst=str(address))/scapy.TCP(sport=source_port, dport=high_numbered_port, flags='R'))
-                    if self.failures:
-                        self.failures_info['responses_from_high_numbered_port'].append((str(address), port, high_numbered_port))
-                    self.logger.error(f'[-] Received response from high-numbered normally-closed port {high_numbered_port}; may respond to any port ({address}:{port})')
-
-            elif (ping[scapy.ICMP].type == 3):
-                if self.failures:
-                    self.failure_info['icmp_unreachable'].append((str(address), port, ping[scapy.ICMP].type, ping[scapy.ICMP].code))
-                logger_str = f'[-] ICMP unreachable error: type={ping[scapy.ICMP].type}, code={ping[scapy.ICMP].code}'
-                if (ping[scapy.ICMP].code in [1, 2, 3, 9, 10, 13]):
-                    logger_str += '; likely filtered'
-                self.logger.error(logger_str)
-            elif (ping == None):
-                if self.failures:
-                    self.failure_info['failed_pings'].append((str(address), port))
-                self.logger.error(f'[-] No response when attempting to ping address ({address}:{port})')
+                    # For each node found, extract transport/topic (bus) stats and connection info
+                    if self.bus:
+                        for host in self.hosts:
+                            for node in host.nodes:
+                                await self.analyze_node_bus(node, node.address, node.port)
 
         if (self.when == 'every'):
             if self.out_file:
