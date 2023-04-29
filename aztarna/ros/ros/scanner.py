@@ -60,37 +60,40 @@ class ROSScanner(RobotAdapter):
 
     async def check_high_numbered_port(self, address, port):
         """
-        Perform a TCP SYN scan on a high-numbered, normally closed port to check if address may repsond to any port.
+        Perform a TCP SYN scan on a high-numbered, normally-closed port to check if address may respond to any port.
         """
-        scapy.conf.verb = 0
-        ping = scapy.sr1(scapy.IP(dst=str(address))/scapy.ICMP(), timeout=0.5)
-        if ((ping != None) or (ping[scapy.ICMP].type != 3)):
-            high_numbered_port = 58243
-            source_port = scapy.RandShort()
-            response_packet = scapy.sr1(scapy.IP(dst=str(address))/scapy.TCP(sport=source_port, dport=high_numbered_port, flags='S'), retry=1, timeout=0.5)
-            if ((response_packet == None) or (response_packet[scapy.TCP].flags != 0x12)):
-                if (response_packet != None):
+        if not self.check:
+            return 1
+        else:
+            scapy.conf.verb = 0
+            ping = scapy.sr1(scapy.IP(dst=str(address))/scapy.ICMP(), timeout=0.5)
+            if ((ping != None) and (ping[scapy.ICMP].type != 3)):
+                high_numbered_port = 58243
+                source_port = scapy.RandShort()
+                response_packet = scapy.sr1(scapy.IP(dst=str(address))/scapy.TCP(sport=source_port, dport=high_numbered_port, flags='S'), retry=1, timeout=0.5)
+                if ((response_packet == None) or (response_packet[scapy.TCP].flags != 0x12)):
+                    if (response_packet != None):
+                        scapy.send(scapy.IP(dst=str(address))/scapy.TCP(sport=source_port, dport=high_numbered_port, flags='R'))
+                    return 1
+                elif (response_packet[scapy.TCP].flags == 0x12):
                     scapy.send(scapy.IP(dst=str(address))/scapy.TCP(sport=source_port, dport=high_numbered_port, flags='R'))
-                return 1
-            elif (response_packet[scapy.TCP].flags == 0x12):
-                scapy.send(scapy.IP(dst=str(address))/scapy.TCP(sport=source_port, dport=high_numbered_port, flags='R'))
+                    if self.failures:
+                        self.failures_info['responses_from_high_numbered_port'].append((str(address), port, high_numbered_port))
+                    self.logger.error(f'[-] Received response from high-numbered normally-closed port {high_numbered_port}; may respond to any port ({address}:{port})')
+                    return 0
+            elif ((ping != None) and (ping[scapy.ICMP].type == 3)):
                 if self.failures:
-                    self.failures_info['responses_from_high_numbered_port'].append((str(address), port, high_numbered_port))
-                self.logger.error(f'[-] Received response from high-numbered normally-closed port {high_numbered_port}; may respond to any port ({address}:{port})')
+                    self.failure_info['icmp_unreachable'].append((str(address), port, ping[scapy.ICMP].type, ping[scapy.ICMP].code))
+                logger_str = f'[-] ICMP unreachable error: type={ping[scapy.ICMP].type}, code={ping[scapy.ICMP].code}'
+                if (ping[scapy.ICMP].code in [1, 2, 3, 9, 10, 13]):
+                    logger_str += '; likely filtered'
+                self.logger.error(logger_str)
                 return 0
-        elif (ping[scapy.ICMP].type == 3):
-            if self.failures:
-                self.failure_info['icmp_unreachable'].append((str(address), port, ping[scapy.ICMP].type, ping[scapy.ICMP].code))
-            logger_str = f'[-] ICMP unreachable error: type={ping[scapy.ICMP].type}, code={ping[scapy.ICMP].code}'
-            if (ping[scapy.ICMP].code in [1, 2, 3, 9, 10, 13]):
-                logger_str += '; likely filtered'
-            self.logger.error(logger_str)
-            return 0
-        elif (ping == None):
-            if self.failures:
-                self.failure_info['failed_pings'].append((str(address), port))
-            self.logger.error(f'[-] No response when attempting to ping address ({address}:{port})')
-            return 0
+            elif (ping == None):
+                if self.failures:
+                    self.failure_info['failed_pings'].append((str(address), port))
+                self.logger.error(f'[-] No response when attempting to ping address ({address}:{port})')
+                return 0
 
     async def check_error_code(self, full_host, client, address, port):
         """
@@ -126,7 +129,7 @@ class ROSScanner(RobotAdapter):
         async with aiohttp.ClientSession(loop=asyncio.get_event_loop(), timeout=self.timeout) as client:
             full_host = 'http://' + str(address) + ':' + str(port)
 
-            # Perform a TCP SYN scan on a high-numbered, normally closed port to check if address may repsond to any port.
+            # Perform a TCP SYN scan on a high-numbered, normally-closed port to check if address may repsond to any port.
             if await self.check_high_numbered_port(address, port) == 1:
                 # Try HTTP GET / request on port and check for error code 501
                 if await self.check_error_code(full_host, client, address, port) == 1:

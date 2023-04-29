@@ -12,12 +12,13 @@ class RobotAdapter:
     """
     BaseScanner class, an abstraction for different type scans
     """
-    def __init__(self, ports=[80], extended=False, bus=False, failures=False):
+    def __init__(self, ports=[80], extended=False, bus=False, failures=False, check=False):
         self.host_list = []
         self.ports = ports
         self.extended = extended
         self.bus = bus
         self.failures = failures
+        self.check = check
         self.when = 'end'
         self.input = False
         self.out_file = None
