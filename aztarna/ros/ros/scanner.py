@@ -17,7 +17,7 @@ from aztarna.ros.ros.helpers import Node, Topic, Service
 from aztarna.ros.ros.helpers import ROSHost
 import sys
 from ipaddress import IPv4Address
-import scapy.all as scapy
+import nmap
 import datetime
 import uuid
 import json
@@ -37,10 +37,7 @@ class ROSScanner(RobotAdapter):
         self.logger = logging.getLogger(__name__)
 
         self.failure_info = {
-            'failed_pings': [],
-            'icmp_unreachable': [],
             'responses_from_high_numbered_port': [],
-
             'failed_501s': [],
             'host_timeout_failures': [],
             'failed_connections': [],
@@ -63,37 +60,19 @@ class ROSScanner(RobotAdapter):
         Perform a TCP SYN scan on a high-numbered, normally-closed port to check if address may respond to any port.
         """
         if not self.check:
-            return 1
+            return (1, '')
         else:
-            scapy.conf.verb = 0
-            ping = scapy.sr1(scapy.IP(dst=str(address))/scapy.ICMP(), timeout=0.5)
-            if ((ping != None) and (ping[scapy.ICMP].type != 3)):
-                high_numbered_port = 58243
-                source_port = scapy.RandShort()
-                response_packet = scapy.sr1(scapy.IP(dst=str(address))/scapy.TCP(sport=source_port, dport=high_numbered_port, flags='S'), retry=1, timeout=0.5)
-                if ((response_packet == None) or (response_packet[scapy.TCP].flags != 0x12)):
-                    if (response_packet != None):
-                        scapy.send(scapy.IP(dst=str(address))/scapy.TCP(sport=source_port, dport=high_numbered_port, flags='R'))
-                    return 1
-                elif (response_packet[scapy.TCP].flags == 0x12):
-                    scapy.send(scapy.IP(dst=str(address))/scapy.TCP(sport=source_port, dport=high_numbered_port, flags='R'))
-                    if self.failures:
-                        self.failures_info['responses_from_high_numbered_port'].append((str(address), port, high_numbered_port))
-                    self.logger.error(f'[-] Received response from high-numbered normally-closed port {high_numbered_port}; may respond to any port ({address}:{port})')
-                    return 0
-            elif ((ping != None) and (ping[scapy.ICMP].type == 3)):
+            high_numbered_port = 58243
+            nm = nmap.PortScanner()
+            result = nm.scan(str(address), str(high_numbered_port))
+            state = result['scan'][str(address)]['tcp'][high_numbered_port]['state']
+            if (state != 'open'):
+                return (1, state)
+            else:
                 if self.failures:
-                    self.failure_info['icmp_unreachable'].append((str(address), port, ping[scapy.ICMP].type, ping[scapy.ICMP].code))
-                logger_str = f'[-] ICMP unreachable error: type={ping[scapy.ICMP].type}, code={ping[scapy.ICMP].code}'
-                if (ping[scapy.ICMP].code in [1, 2, 3, 9, 10, 13]):
-                    logger_str += '; likely filtered'
-                self.logger.error(logger_str)
-                return 0
-            elif (ping == None):
-                if self.failures:
-                    self.failure_info['failed_pings'].append((str(address), port))
-                self.logger.error(f'[-] No response when attempting to ping address ({address}:{port})')
-                return 0
+                    self.failures_info['responses_from_high_numbered_port'].append((str(address), port, high_numbered_port))
+                self.logger.error(f'[-] Received response from high-numbered normally-closed port {high_numbered_port}; may respond to any port ({address}:{port})')
+                return (0, state)
 
     async def check_error_code(self, full_host, client, address, port):
         """
@@ -130,12 +109,14 @@ class ROSScanner(RobotAdapter):
             full_host = 'http://' + str(address) + ':' + str(port)
 
             # Perform a TCP SYN scan on a high-numbered, normally-closed port to check if address may repsond to any port.
-            if await self.check_high_numbered_port(address, port) == 1:
+            high_numbered_port_result = await self.check_high_numbered_port(address, port)
+            if high_numbered_port_result[0] == 1:
                 # Try HTTP GET / request on port and check for error code 501
                 if await self.check_error_code(full_host, client, address, port) == 1:
 
                     ros_master_client = ServerProxy(full_host, loop=asyncio.get_event_loop(), client=client)
                     ros_host = ROSHost(address, port)
+                    ros_host.high_numbered_port_state = high_numbered_port_result[1]
                     async with self.semaphore:
                         try:
                             code, msg, val = await ros_master_client.getSystemState('')
@@ -412,6 +393,8 @@ class ROSScanner(RobotAdapter):
         """
         for host in self.hosts:
             print(f'\nHost: {host.address}:{host.port}')
+            if self.check:
+                print('\n\tState of checked high-numbered port: ' + str(host.high_numbered_port_state))
             for node in host.nodes:
                 print('\n\tNode: ' + str(node), file=output_location)
                 print('\n\t\t Published topics:', file=output_location)
@@ -486,14 +469,6 @@ class ROSScanner(RobotAdapter):
 
         if self.failures is True:
             print('\nFailures:', file=output_location)
-            if self.failure_info['failed_pings']:
-                print('\n\tNo response when attempting to ping address; Num: ' + str(len(self.failure_info['failed_pings'])), file=output_location)
-                for failure in self.failure_info['failed_pings']:
-                    print(f'\t\t - {failure[0]}:{failure[1]}', file=output_location)
-            if self.failure_info['icmp_unreachable']:
-                print('\n\tICMP unreachable error; Num: ' + str(len(self.failure_info['icmp_unreachable'])), file=output_location)
-                for failure in self.failure_info['icmp_unreachable']:
-                    print(f'\t\t - {failure[0]}:{failure[1]}: type={failure[2]}, code={failure[3]}', file=output_location)
             if self.failure_info['responses_from_high_numbered_port']:
                 print('\n\tRecieved response from high-numbered normally-closed port; Num: ' + str(len(self.failure_info['responses_from_high_numbered_port'])), file=output_location)
                 for failure in self.failure_info['responses_from_high_numbered_port']:
@@ -564,19 +539,19 @@ class ROSScanner(RobotAdapter):
                 'failure_info': self.failure_info
             }
             for host in self.hosts:
-                save_dict['hosts'][f'{host.address}:{host.port}'] = {'nodes': {}, 'communications': {}}
+                save_dict['hosts'][f'{host.address}:{host.port}'] = {'nodes': {}, 'communications': {}, 'services': host.services, 'high_numbered_port_state': host.high_numbered_port_state}
                 for node in host.nodes:
                     node_dict = copy.deepcopy(node.__dict__)
                     node_dict['published_topics'] = [str(topic) for topic in node_dict['published_topics']]
                     node_dict['subscribed_topics'] = [str(topic) for topic in node_dict['subscribed_topics']]
                     node_dict['services'] = [str(service) for service in node_dict['services']]
                     save_dict['hosts'][f'{host.address}:{host.port}']['nodes'][node.name] = node_dict
-                for i, communication in enumerate(host.communications):
+                for communication in host.communications:
                     communication_dict = copy.deepcopy(communication.__dict__)
                     communication_dict['publishers'] = [str(publisher) for publisher in communication_dict['publishers']]
                     communication_dict['subsrcibers'] = [str(subscriber) for subscriber in communication_dict['subscribers']]
                     communication_dict['topic'] = str(communication_dict['topic'])
-                    save_dict['hosts'][f'{host.address}:{host.port}']['communications'][str(communication_dict['topic'])] = communication_dict
+                    save_dict['hosts'][f'{host.address}:{host.port}']['communications'][communication_dict['topic']] = communication_dict
 
             if (('json' in format) or ('JSON' in format) or ('all' in format)):
                 with open(f'{datetime_now}_{uuid4}.json', 'x') as file:
