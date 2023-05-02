@@ -183,7 +183,8 @@ class ROSScanner(RobotAdapter):
                     if self.bus:
                         for host in self.hosts:
                             for node in host.nodes:
-                                await self.analyze_node_bus(node, node.address, node.port)
+                                if await self.analyze_node_bus(node, node.address, node.port) != 1:
+                                    await self.analyze_node_bus(node, address, node.port)
 
         if (self.when == 'every'):
             if self.out_file:
@@ -206,6 +207,7 @@ class ROSScanner(RobotAdapter):
             xmlrpcuri = 'http://' + str(address) + ':' + str(port)
             node_client = ServerProxy(xmlrpcuri, loop=asyncio.get_event_loop(), client=client)
             async with self.semaphore:
+                cant_connect = False
                 try:
                     response = await node_client.getBusStats('')
                     node.get_bus_stats_response = response
@@ -254,10 +256,12 @@ class ROSScanner(RobotAdapter):
                     if self.failures:
                         self.failure_info['get_bus_stats_timeouts'].append((str(address), port))
                     self.logger.error(f'[-] Timed out while attempting to get bus stats')
+                    cant_connect = True
                 except Exception as e:
                     if self.failures:
                         self.failure_info['get_bus_stats_failures'].append((str(node), str(e)))
                     self.logger.error(f'[-] Error when attempting to get bus stats: {e} ({address}:{port})')
+                    cant_connect = True
 
                 try:
                     response = await node_client.getBusInfo('')
@@ -287,12 +291,18 @@ class ROSScanner(RobotAdapter):
                     if self.failures:
                         self.failure_info['get_bus_info_timeouts'].append((str(address), port))
                     self.logger.error(f'[-] Timed out while attempting to get bus info')
+                    cant_connect = True
                 except Exception as e:
                     if self.failures:
                         self.failure_info['get_bus_info_failures'].append((str(node), str(e)))
                     self.logger.error(f'[-] Error when attempting to get bus info: {e} ({address}:{port})')
+                    cant_connect = True
 
                 await client.close()
+                if not cant_connect:
+                    return 1
+                else:
+                    return 0
 
     def extract_nodes(self, source_array, topics, pub_or_sub, host):
         """
@@ -417,7 +427,7 @@ class ROSScanner(RobotAdapter):
             if self.check:
                 print('\n\tState(s) of checked high-numbered port(s):', file=output_location)
             for port, state in host.high_numbered_port_states.items():
-                print('\n\t\t - ' + str(port) + ': ' + state, file=output_location)
+                print('\t\t - ' + str(port) + ': ' + state, file=output_location)
             for node in host.nodes:
                 print('\n\tNode: ' + str(node), file=output_location)
                 print('\n\t\t Published topics:', file=output_location)
