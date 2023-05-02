@@ -18,11 +18,13 @@ from aztarna.ros.ros.helpers import ROSHost
 import sys
 from ipaddress import IPv4Address
 import nmap
+import random
 import datetime
 import uuid
 import json
 import yaml
 import copy
+import os
 
 class ROSScanner(RobotAdapter):
     """
@@ -55,24 +57,43 @@ class ROSScanner(RobotAdapter):
             'bus_info_failed_code1s': []
         }
 
-    async def check_high_numbered_port(self, address, port):
+    async def check_high_numbered_ports(self, address, port):
         """
         Perform a TCP SYN scan on a high-numbered, normally-closed port to check if address may respond to any port.
         """
         if not self.check:
-            return (1, '')
+            return (1, [])
         else:
-            high_numbered_port = 58243
+            high_numbered_ports = [58243]
+            for i in range(self.check-1):
+                random_high_numbered_port = random.randint(49152, 65535)
+                while ((random_high_numbered_port in [49160, 64738]) or (random_high_numbered_port in high_numbered_ports)):
+                    random_high_numbered_port = random.randint(49152, 65535)
+                high_numbered_ports.append(random_high_numbered_port)
+            may_respond_to_any = True
+            port_states = {}
+            timeout = False
             nm = nmap.PortScanner()
-            result = nm.scan(str(address), str(high_numbered_port))
-            state = result['scan'][str(address)]['tcp'][high_numbered_port]['state']
-            if (state != 'open'):
-                return (1, state)
+            for high_numbered_port in high_numbered_ports:
+                try:
+                    nm.scan(str(address), str(high_numbered_port), timeout=0.1)
+                    state = nm[str(address)]['tcp'][high_numbered_port]['state']
+                    if (state != 'open'):
+                        may_respond_to_any = False
+                    port_states[high_numbered_port] = state
+                except nmap.PortScannerTimeout:
+                    may_respond_to_any = False
+                    port_states[high_numbered_port] = 'timeout'
+                    timeout = True
+            if timeout:
+                os.system('reset')
+            if not may_respond_to_any:
+                return (1, port_states)
             else:
                 if self.failures:
-                    self.failures_info['responses_from_high_numbered_port'].append((str(address), port, high_numbered_port))
-                self.logger.error(f'[-] Received response from high-numbered normally-closed port {high_numbered_port}; may respond to any port ({address}:{port})')
-                return (0, state)
+                    self.failure_info['responses_from_high_numbered_ports'].append((str(address), port, list(port_states.keys())))
+                self.logger.error(f'[-] Received responses from high-numbered normally-closed ports: {list(port_states.keys())}; may respond to any port ({address}:{port})')
+                return (0, port_states)
 
     async def check_error_code(self, full_host, client, address, port):
         """
@@ -108,15 +129,15 @@ class ROSScanner(RobotAdapter):
         async with aiohttp.ClientSession(loop=asyncio.get_event_loop(), timeout=self.timeout) as client:
             full_host = 'http://' + str(address) + ':' + str(port)
 
-            # Perform a TCP SYN scan on a high-numbered, normally-closed port to check if address may repsond to any port.
-            high_numbered_port_result = await self.check_high_numbered_port(address, port)
-            if high_numbered_port_result[0] == 1:
+            # Perform a TCP SYN scan on high-numbered, normally-closed port(s) to check if address may repsond to any port.
+            high_numbered_ports_result = await self.check_high_numbered_ports(address, port)
+            if high_numbered_ports_result[0] == 1:
                 # Try HTTP GET / request on port and check for error code 501
                 if await self.check_error_code(full_host, client, address, port) == 1:
 
                     ros_master_client = ServerProxy(full_host, loop=asyncio.get_event_loop(), client=client)
                     ros_host = ROSHost(address, port)
-                    ros_host.high_numbered_port_state = high_numbered_port_result[1]
+                    ros_host.high_numbered_port_states = high_numbered_ports_result[1]
                     async with self.semaphore:
                         try:
                             code, msg, val = await ros_master_client.getSystemState('')
@@ -392,9 +413,11 @@ class ROSScanner(RobotAdapter):
         Print the information of a ROS system.
         """
         for host in self.hosts:
-            print(f'\nHost: {host.address}:{host.port}')
+            print(f'\nHost: {host.address}:{host.port}', file=output_location)
             if self.check:
-                print('\n\tState of checked high-numbered port: ' + str(host.high_numbered_port_state))
+                print('\n\tState(s) of checked high-numbered port(s):', file=output_location)
+            for port, state in host.high_numbered_port_states.items():
+                print('\n\t\t - ' + str(port) + ': ' + state, file=output_location)
             for node in host.nodes:
                 print('\n\tNode: ' + str(node), file=output_location)
                 print('\n\t\t Published topics:', file=output_location)

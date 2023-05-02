@@ -17,7 +17,7 @@ class ROSHost(BaseHostROS):
         self.port = port
         self.communications = []
         self.services = []
-        self.high_numbered_port_state = ''
+        self.high_numbered_port_states = {}
 
     def __repr__(self):
         if len(self.nodes) == 0:
