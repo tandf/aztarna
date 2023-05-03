@@ -17,7 +17,11 @@ class ROSHost(BaseHostROS):
         self.port = port
         self.communications = []
         self.services = []
+
         self.high_numbered_port_states = {}
+        self.parameter_names = []
+        self.get_param_names_response = []
+        self.param_response_unexpected = False
 
     def __repr__(self):
         if len(self.nodes) == 0:
@@ -38,7 +42,7 @@ class Node(BaseNodeROS):
         # transport/topic (bus) stats and connection info
         self.publish_stats = []
         self.subscribe_stats = []
-        self.service_stats = {}
+        self.service_stats = {'proposed': 'http://wiki.ros.org/ROS/Slave_API'}
         self.connections = []
 
         self.get_bus_stats_response = []

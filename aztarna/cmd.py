@@ -28,6 +28,7 @@ def main():
     parser.add_argument('-o', '--out_file', help='Output file for the results')
     parser.add_argument('-e', '--extended', help='Extended scan of the hosts', action='store_true')
     parser.add_argument('-b', '--bus', help='Get node transport/topic (bus) statistics and connection information (-e must also be selected)', action='store_true')
+    parser.add_argument('-m', '--parameters', help='Get parameter name information', action='store_true')
     parser.add_argument('-f', '--failures', help='Keep track of information about failures', action='store_true')
     parser.add_argument('-c', '--check', help='Try TCP SYN scan on a high-numbered normally-closed port(s) to check if address may respond to any port (specify number of (random) high-numbered nomrally-closed ports to scan)', default=0, type=int)
     parser.add_argument('-s', '--save', help='Save ROS system information to a new file with unique filename (specify format to save information: output, JSON, YAML, or all; if multiple but not all, separate with commas)', default='none')
@@ -102,6 +103,7 @@ def main():
 
         scanner.extended = args.extended
         scanner.bus = args.bus
+        scanner.parameters = args.parameters
         scanner.failures = args.failures
         scanner.check = args.check
         scanner.out_file = args.out_file

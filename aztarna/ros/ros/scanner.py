@@ -54,7 +54,11 @@ class ROSScanner(RobotAdapter):
 
             'get_bus_info_timeouts': [],
             'get_bus_info_failures': [],
-            'bus_info_failed_code1s': []
+            'bus_info_failed_code1s': [],
+
+            'get_param_names_timeouts': [],
+            'get_param_names_failures': [],
+            'param_names_failed_code1s': []
         }
 
     async def check_high_numbered_ports(self, address, port):
@@ -62,7 +66,7 @@ class ROSScanner(RobotAdapter):
         Perform a TCP SYN scan on a high-numbered, normally-closed port to check if address may respond to any port.
         """
         if not self.check:
-            return (1, [])
+            return (1, {})
         else:
             high_numbered_ports = [58243]
             for i in range(self.check-1):
@@ -111,7 +115,7 @@ class ROSScanner(RobotAdapter):
         except asyncio.TimeoutError:
             if self.failures:
                 self.failure_info['host_timeout_failures'].append((str(address), port))
-            self.logger.error(f'[-] Timed out while attempting to connect to potential host port')
+            self.logger.error(f'[-] Timed out while attempting to connect to potential host port ({address}:{port})')
             return 0
         except Exception as e:
             if self.failures:
@@ -173,7 +177,7 @@ class ROSScanner(RobotAdapter):
                         except asyncio.TimeoutError:
                             if self.failures:
                                 self.failure_info['get_system_state_timeouts'].append((str(address), port))
-                            self.logger.error(f'[-] Timed out while attempting to get system state')
+                            self.logger.error(f'[-] Timed out while attempting to get system state ({address}:{port})')
                         except Exception as e:
                             if self.failures:
                                 self.failure_info['get_system_state_failures'].append((str(address), port, str(e)))
@@ -181,10 +185,13 @@ class ROSScanner(RobotAdapter):
 
                     # For each node found, extract transport/topic (bus) stats and connection info
                     if self.bus:
-                        for host in self.hosts:
-                            for node in host.nodes:
-                                if await self.analyze_node_bus(node, node.address, node.port) != 1:
-                                    await self.analyze_node_bus(node, address, node.port)
+                        for node in ros_host.nodes:
+                            if await self.analyze_node_bus(node, node.address, node.port) != 1:
+                                await self.analyze_node_bus(node, address, node.port)
+
+                    # Extract information about parameter names stored on the server
+                    if self.parameters:
+                        await self.extract_parameters(ros_host, address, port)
 
         if (self.when == 'every'):
             if self.out_file:
@@ -238,6 +245,7 @@ class ROSScanner(RobotAdapter):
                                     subscribe_stats_entry['subConnectionData']['connected'] = entry[1][0][4]
                                 node.subscribe_stats.append(subscribe_stats_entry)
                             if service_stats:
+                                node.service_stats.clear()
                                 node.service_stats['numRequests'] = service_stats[0]
                                 node.service_stats['bytesReceived'] = service_stats[1]
                                 node.service_stats['bytesSent'] = service_stats[2]
@@ -254,12 +262,12 @@ class ROSScanner(RobotAdapter):
 
                 except asyncio.TimeoutError:
                     if self.failures:
-                        self.failure_info['get_bus_stats_timeouts'].append((str(address), port))
-                    self.logger.error(f'[-] Timed out while attempting to get bus stats')
+                        self.failure_info['get_bus_stats_timeouts'].append((str(node), str(address), port))
+                    self.logger.error(f'[-] Timed out while attempting to get bus stats ({address}:{port})')
                     cant_connect = True
                 except Exception as e:
                     if self.failures:
-                        self.failure_info['get_bus_stats_failures'].append((str(node), str(e)))
+                        self.failure_info['get_bus_stats_failures'].append((str(node), str(address), port, str(e)))
                     self.logger.error(f'[-] Error when attempting to get bus stats: {e} ({address}:{port})')
                     cant_connect = True
 
@@ -289,12 +297,12 @@ class ROSScanner(RobotAdapter):
 
                 except asyncio.TimeoutError:
                     if self.failures:
-                        self.failure_info['get_bus_info_timeouts'].append((str(address), port))
-                    self.logger.error(f'[-] Timed out while attempting to get bus info')
+                        self.failure_info['get_bus_info_timeouts'].append((str(node), str(address), port))
+                    self.logger.error(f'[-] Timed out while attempting to get bus info ({address}:{port})')
                     cant_connect = True
                 except Exception as e:
                     if self.failures:
-                        self.failure_info['get_bus_info_failures'].append((str(node), str(e)))
+                        self.failure_info['get_bus_info_failures'].append((str(node), str(address), port, str(e)))
                     self.logger.error(f'[-] Error when attempting to get bus info: {e} ({address}:{port})')
                     cant_connect = True
 
@@ -303,6 +311,40 @@ class ROSScanner(RobotAdapter):
                     return 1
                 else:
                     return 0
+
+    async def extract_parameters(self, ros_host, address, port):
+        """
+        Extract information about names of parameters stored on the server.
+        """
+        async with aiohttp.ClientSession(loop=asyncio.get_event_loop(), timeout=self.timeout) as client:
+            xmlrpcuri = 'http://' + str(address) + ':' + str(port)
+            ros_client = ServerProxy(xmlrpcuri, loop=asyncio.get_event_loop(), client=client)
+            async with self.semaphore:
+                try:
+                    response = await ros_client.getParamNames('')
+                    ros_host.get_param_names_response = response
+                    try:
+                        code, msg, parameters = response
+                        if code == 1:
+                            ros_host.parameter_names = parameters
+                        else:
+                            if self.failures:
+                                self.failure_info['param_names_failed_code1s'].append((str(address), port))
+                            self.logger.critical(f'[-] Expected code 1 when getting param names but received code {code}. Terminating ({address}:{port})')
+                    except Exception as e:
+                        ros_host.param_response_unexpected = True
+                        self.logger.warning(f'[-] Param names response in unexpected format: {e} ({address}:{port})')
+
+                except asyncio.TimeoutError:
+                    if self.failures:
+                        self.failure_info['get_param_names_timeouts'].append((str(address), port))
+                    self.logger.error(f'[-] Timed out while attempting to get param names ({address}:{port})')
+                except Exception as e:
+                    if self.failures:
+                        self.failure_info['get_param_names_failures'].append((str(address), port, str(e)))
+                    self.logger.error(f'[-] Error when attempting to get param names: {e} ({address}:{port})')
+
+                await client.close()
 
     def extract_nodes(self, source_array, topics, pub_or_sub, host):
         """
@@ -457,7 +499,7 @@ class ROSScanner(RobotAdapter):
                 print('\tNode transport/topic (bus) statistics and connection information:', file=output_location)
                 for node in host.nodes:
                     print('\n\t\tNode: ' + str(node), file=output_location)
-                    if (not (node.stats_unexpected)):
+                    if (not node.stats_unexpected):
                         print('\n\t\t\t Publish statistics:', file=output_location)
                         for entry in node.publish_stats:
                             print('\n\t\t\t\t * Topic name: ' + str(entry['topicName']), file=output_location)
@@ -479,14 +521,14 @@ class ROSScanner(RobotAdapter):
                                 print('\t\t\t\t\t Drop estimate: ' + str(entry['subConnectionData']['dropEstimate']), file=output_location)
                                 print('\t\t\t\t\t Connected: ' + str(entry['subConnectionData']['connected']), file=output_location)
                         print('\n\t\t\t Service statistics:', file=output_location)
-                        if node.service_stats:
+                        if ('proposed' not in node.service_stats.keys()):
                             print('\t\t\t\t * Num requests' + str(node.service_stats['numRequests']), file=output_location)
                             print('\t\t\t\t   Bytes received' + str(node.service_stats['bytesReceived']), file=output_location)
                             print('\t\t\t\t   Bytes sent' + str(node.service_stats['bytesSent']), file=output_location)
                     else:
                         print("\n\t\t\t Statistics don't match ROS API format", file=output_location)
                         print('\t\t\t\t Response from node: ' + str(node.get_bus_stats_response), file=output_location)
-                    if (not (node.info_unexpected)):
+                    if (not node.info_unexpected):
                         print('\n\t\t\t Connection information:', file=output_location)
                         for i in range(1, len(node.connections)+1):
                             print('\n\t\t\t\t * Connection ID: ' + str(node.connections[i-1][f'connectionId{i}']), file=output_location)
@@ -500,8 +542,18 @@ class ROSScanner(RobotAdapter):
                         print('\t\t\t\t Response from node: ' + str(node.get_bus_info_response), file=output_location)
                 print('\n\n', file=output_location)
 
+            if self.parameters is True:
+                print('\tServer parameters:', file=output_location)
+                if (not host.param_response_unexpected):
+                    for parameter in host.parameter_names:
+                        print('\t\t - ' + parameter, file=output_location)
+                else:
+                    print("\tParameter name response doesn't match ROS API format", file=output_location)
+                    print('\t\tServer response: ' + str(host.get_param_names_response), file=output_location)
+                print('\n\n', file=output_location)
+
         if self.failures is True:
-            print('\nFailures:', file=output_location)
+            print('Failures:', file=output_location)
             if self.failure_info['responses_from_high_numbered_port']:
                 print('\n\tRecieved response from high-numbered normally-closed port; Num: ' + str(len(self.failure_info['responses_from_high_numbered_port'])), file=output_location)
                 for failure in self.failure_info['responses_from_high_numbered_port']:
@@ -534,11 +586,11 @@ class ROSScanner(RobotAdapter):
             if self.failure_info['get_bus_stats_timeouts']:
                 print('\n\tgetBusStats timeout; Num: ' + str(len(self.failure_info['get_bus_stats_timeouts'])), file=output_location)
                 for failure in self.failure_info['get_bus_stats_timeouts']:
-                    print(f'\t\t - {failure[0]}:{failure[1]}', file=output_location)
+                    print(f'\t\t - Node: {failure[0]} ({failure[1]}:{failure[2]})', file=output_location)
             if self.failure_info['get_bus_stats_failures']:
                 print('\n\tgetBusStats failure; Num: ' + str(len(self.failure_info['get_bus_stats_failures'])), file=output_location)
                 for failure in self.failure_info['get_bus_stats_failures']:
-                    print(f'\t\t - Node: {failure[0]}: {failure[1]}', file=output_location)
+                    print(f'\t\t - Node: {failure[0]}: {failure[3]} ({failure[1]}:{failure[2]})', file=output_location)
             if self.failure_info['bus_stats_failed_code1s']:
                 print('\n\tgetBusStats code returned not 1; Num: ' + str(len(self.failure_info['bus_stats_failed_code1s'])), file=output_location)
                 for failure in self.failure_info['bus_stats_failed_code1s']:
@@ -546,11 +598,11 @@ class ROSScanner(RobotAdapter):
             if self.failure_info['get_bus_info_timeouts']:
                 print('\n\tgetBusInfo timeout; Num: ' + str(len(self.failure_info['get_bus_info_timeouts'])), file=output_location)
                 for failure in self.failure_info['get_bus_info_timeouts']:
-                    print(f'\t\t - {failure[0]}:{failure[1]}', file=output_location)
+                    print(f'\t\t - Node: {failure[0]} ({failure[1]}:{failure[2]})', file=output_location)
             if self.failure_info['get_bus_info_failures']:
                 print('\n\tgetBusInfo failure; Num: ' + str(len(self.failure_info['get_bus_info_failures'])), file=output_location)
                 for failure in self.failure_info['get_bus_info_failures']:
-                    print(f'\t\t - Node: {failure[0]}: {failure[1]}', file=output_location)
+                    print(f'\t\t - Node: {failure[0]}: {failure[3]} ({failure[1]}:{failure[2]})', file=output_location)
             if self.failure_info['bus_info_failed_code1s']:
                 print('\n\tgetBusInfo code returned not 1; Num: ' + str(len(self.failure_info['bus_info_failed_code1s'])), file=output_location)
                 for failure in self.failure_info['bus_info_failed_code1s']:
@@ -572,7 +624,7 @@ class ROSScanner(RobotAdapter):
                 'failure_info': self.failure_info
             }
             for host in self.hosts:
-                save_dict['hosts'][f'{host.address}:{host.port}'] = {'nodes': {}, 'communications': {}, 'services': host.services, 'high_numbered_port_state': host.high_numbered_port_state}
+                save_dict['hosts'][f'{host.address}:{host.port}'] = {'nodes': {}, 'communications': {}, 'services': host.services, 'high_numbered_port_state': host.high_numbered_port_states}
                 for node in host.nodes:
                     node_dict = copy.deepcopy(node.__dict__)
                     node_dict['published_topics'] = [str(topic) for topic in node_dict['published_topics']]
@@ -582,7 +634,7 @@ class ROSScanner(RobotAdapter):
                 for communication in host.communications:
                     communication_dict = copy.deepcopy(communication.__dict__)
                     communication_dict['publishers'] = [str(publisher) for publisher in communication_dict['publishers']]
-                    communication_dict['subsrcibers'] = [str(subscriber) for subscriber in communication_dict['subscribers']]
+                    communication_dict['subscribers'] = [str(subscriber) for subscriber in communication_dict['subscribers']]
                     communication_dict['topic'] = str(communication_dict['topic'])
                     save_dict['hosts'][f'{host.address}:{host.port}']['communications'][communication_dict['topic']] = communication_dict
 
