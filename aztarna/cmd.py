@@ -126,9 +126,17 @@ def main():
                 scanner.write_to_file(args.out_file)
             else:
                 if ('none' not in scanner.save_format):
-                    scanner.save_to_file(scanner.save_format)
+                    try:
+                        scanner.save_to_file(scanner.save_format)
+                    except Exception as e:
+                        scanner.critical_failures['save_to_file_failures'].append(([f'{host.address}:{host.port}' for host in scanner.hosts], str(e)))
+                        scanner.logger.critical(f"[-] Critical: save_to_file failure: {e} ({[f'{host.address}:{host.port}' for host in scanner.hosts]})")
                 elif args.extended is True:
-                    scanner.print_results()
+                    try:
+                        scanner.print_results()
+                    except Exception as e:
+                        scanner.critical_failures['print_results_failures'].append(([f'{host.address}:{host.port}' for host in scanner.hosts], str(e)))
+                        scanner.logger.critical(f"[-] Critical: print_results failure: {e} ({[f'{host.address}:{host.port}' for host in scanner.hosts]})")
 
     except Exception as e:
         logger.critical('Exception occurred during execution')

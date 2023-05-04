@@ -23,6 +23,7 @@ import datetime
 import uuid
 import json
 import yaml
+import pickle
 import copy
 import os
 
@@ -58,7 +59,16 @@ class ROSScanner(RobotAdapter):
 
             'get_param_names_timeouts': [],
             'get_param_names_failures': [],
-            'param_names_failed_code1s': []
+            'param_names_failed_code1s': [],
+        }
+
+        self.critical_failures = {
+            'analyze_nodes_failures': [],
+            'analyze_node_bus_failures': [],
+            'extract_parameters_failures': [],
+            'save_to_file_failures': [],
+            'print_results_failures': [],
+            'save_to_file:print_results_failures': []
         }
 
     async def check_high_numbered_ports(self, address, port):
@@ -130,81 +140,117 @@ class ROSScanner(RobotAdapter):
         :param address: address of the ROS master
         :param port: port of the ROS master
         """
-        async with aiohttp.ClientSession(loop=asyncio.get_event_loop(), timeout=self.timeout) as client:
-            full_host = 'http://' + str(address) + ':' + str(port)
+        try:
+            async with aiohttp.ClientSession(loop=asyncio.get_event_loop(), timeout=self.timeout) as client:
+                full_host = 'http://' + str(address) + ':' + str(port)
 
-            # Perform a TCP SYN scan on high-numbered, normally-closed port(s) to check if address may repsond to any port.
-            high_numbered_ports_result = await self.check_high_numbered_ports(address, port)
-            if high_numbered_ports_result[0] == 1:
-                # Try HTTP GET / request on port and check for error code 501
-                if await self.check_error_code(full_host, client, address, port) == 1:
+                # Perform a TCP SYN scan on high-numbered, normally-closed port(s) to check if address may repsond to any port.
+                high_numbered_ports_result = await self.check_high_numbered_ports(address, port)
+                if high_numbered_ports_result[0] == 1:
+                    # Try HTTP GET / request on port and check for error code 501
+                    if await self.check_error_code(full_host, client, address, port) == 1:
 
-                    ros_master_client = ServerProxy(full_host, loop=asyncio.get_event_loop(), client=client)
-                    ros_host = ROSHost(address, port)
-                    ros_host.high_numbered_port_states = high_numbered_ports_result[1]
-                    async with self.semaphore:
-                        try:
-                            code, msg, val = await ros_master_client.getSystemState('')
-                            if code == 1:
+                        ros_master_client = ServerProxy(full_host, loop=asyncio.get_event_loop(), client=client)
+                        ros_host = ROSHost(address, port)
+                        ros_host.high_numbered_port_states = high_numbered_ports_result[1]
+                        async with self.semaphore:
+                            try:
+                                response = await ros_master_client.getSystemState('')
                                 self.hosts.append(ros_host)
-                                if self.extended:
-                                    publishers_array = val[0]
-                                    subscribers_array = val[1]
-                                    services_array = val[2]
-                                    found_topics = await self.analyze_topic_types(ros_master_client)  # In order to analyze the nodes topics are needed
+                                ros_host.get_system_state_response = response
+                                try:
+                                    code, msg, val = response
+                                    if code == 1:
+                                        if self.extended:
+                                            publishers_array = val[0]
+                                            subscribers_array = val[1]
+                                            services_array = val[2]
+                                            found_topics = await self.analyze_topic_types(ros_master_client)  # In order to analyze the nodes topics are needed
 
-                                    self.extract_nodes(publishers_array, found_topics, 'pub', ros_host)
-                                    self.extract_nodes(subscribers_array, found_topics, 'sub', ros_host)
-                                    self.extract_services(services_array, ros_host)
+                                            self.extract_nodes(publishers_array, found_topics, 'pub', ros_host)
+                                            self.extract_nodes(subscribers_array, found_topics, 'sub', ros_host)
+                                            self.extract_services(services_array, ros_host)
 
-                                    for topic_name, topic_type in found_topics.items():  # key, value
-                                        current_topic = Topic(topic_name, topic_type)
-                                        comm = CommunicationROS(current_topic)
-                                        for node in ros_host.nodes:
-                                            if next((x for x in node.published_topics if x.name == current_topic.name), None) is not None:
-                                                comm.publishers.append(node)
-                                            if next((x for x in node.subscribed_topics if x.name == current_topic.name), None) is not None:
-                                                comm.subscribers.append(node)
-                                        ros_host.communications.append(comm)
-                                    await self.set_xmlrpcuri_node(ros_master_client, ros_host)
-                                await client.close()
-                                self.logger.warning('[+] ROS Host found at {}:{}'.format(ros_host.address, ros_host.port))
-                            else:
+                                            for topic_name, topic_type in found_topics.items():  # key, value
+                                                current_topic = Topic(topic_name, topic_type)
+                                                comm = CommunicationROS(current_topic)
+                                                for node in ros_host.nodes:
+                                                    if next((x for x in node.published_topics if x.name == current_topic.name), None) is not None:
+                                                        comm.publishers.append(node)
+                                                    if next((x for x in node.subscribed_topics if x.name == current_topic.name), None) is not None:
+                                                        comm.subscribers.append(node)
+                                                ros_host.communications.append(comm)
+                                            await self.set_xmlrpcuri_node(ros_master_client, ros_host)
+                                        await client.close()
+                                        self.logger.warning('[+] ROS Host found at {}:{}'.format(ros_host.address, ros_host.port))
+                                    else:
+                                        if self.failures:
+                                            self.failure_info['host_failed_code1s'].append((str(address), port))
+                                        self.logger.critical(f'[-] Expected code 1 when getting system state but received code {code}. Terminating ({address}:{port})')
+                                except Exception as e:
+                                    ros_host.system_state_response_unexpected = True
+                                    self.logger.critical(f'[-] System state response in unexpected format: {e}. Terminating ({address}:{port})')
+
+                            except asyncio.TimeoutError:
                                 if self.failures:
-                                    self.failure_info['host_failed_code1s'].append((str(address), port))
-                                self.logger.critical(f'[-] Expected code 1 when getting system state but received code {code}. Terminating ({address}:{port})')
+                                    self.failure_info['get_system_state_timeouts'].append((str(address), port))
+                                self.logger.error(f'[-] Timed out while attempting to get system state ({address}:{port})')
+                            except Exception as e:
+                                if self.failures:
+                                    self.failure_info['get_system_state_failures'].append((str(address), port, str(e)))
+                                self.logger.error(f'[-] Error getting system state: {e} ({address}:{port})')
 
-                        except asyncio.TimeoutError:
-                            if self.failures:
-                                self.failure_info['get_system_state_timeouts'].append((str(address), port))
-                            self.logger.error(f'[-] Timed out while attempting to get system state ({address}:{port})')
+                        # For each node found, extract transport/topic (bus) stats and connection info
+                        if self.bus:
+                            for node in ros_host.nodes:
+                                try_again = False
+                                try:
+                                    if await self.analyze_node_bus(node, node.address, node.port) != 1:
+                                        try_again = True
+                                except Exception as e:
+                                    self.critical_failures['analyze_node_bus_failures'].append((str(node), str(node.address), node.port, str(e)))
+                                    self.logger.critical(f'[-] Critical: analyze_node_bus failure: {e} ({node.address}:{node.port})')
+                                    try_again = True
+
+                                if try_again:
+                                    try:
+                                        await self.analyze_node_bus(node, address, node.port)
+                                    except Exception as e:
+                                        self.critical_failures['analyze_node_bus_failures'].append((str(node), str(address), node.port, str(e)))
+                                        self.logger.critical(f'[-] Critical: analyze_node_bus failure: {e} ({address}:{node.port})')
+
+                        # Extract information about parameter names stored on the server
+                        if self.parameters:
+                            try:
+                                await self.extract_parameters(ros_host, address, port)
+                            except Exception as e:
+                                self.critical_failures['extract_parameters_failures'].append((str(address), port, str(e)))
+                                self.logger.critical(f'[-] Critical: extract_parameters failure: {e} ({address}:{port})')
+
+            if (self.when == 'every'):
+                if self.out_file:
+                    self.write_to_file(self.out_file)
+                else:
+                    if ('none' not in self.save_format):
+                        try:
+                            self.save_to_file(self.save_format)
                         except Exception as e:
-                            if self.failures:
-                                self.failure_info['get_system_state_failures'].append((str(address), port, str(e)))
-                            self.logger.error(f'[-] Error getting system state: {e} ({address}:{port})')
+                            self.critical_failures['save_to_file_failures'].append((str(address), port, str(e)))
+                            self.logger.critical(f'[-] Critical: save_to_file failure: {e} ({address}:{port})')
+                    elif self.extended is True:
+                        try:
+                            self.print_results()
+                        except Exception as e:
+                            self.critical_failures['print_results_failures'].append((str(address), port, str(e)))
+                            self.logger.critical(f'[-] Critical: print_results failure: {e} ({address}:{port})')
 
-                    # For each node found, extract transport/topic (bus) stats and connection info
-                    if self.bus:
-                        for node in ros_host.nodes:
-                            if await self.analyze_node_bus(node, node.address, node.port) != 1:
-                                await self.analyze_node_bus(node, address, node.port)
+                self.hosts.clear()
+                for key in self.failure_info.keys():
+                    self.failure_info[key].clear()
 
-                    # Extract information about parameter names stored on the server
-                    if self.parameters:
-                        await self.extract_parameters(ros_host, address, port)
-
-        if (self.when == 'every'):
-            if self.out_file:
-                self.write_to_file(self.out_file)
-            else:
-                if ('none' not in self.save_format):
-                    self.save_to_file(self.save_format)
-                elif self.extended is True:
-                    self.print_results()
-
-            self.hosts.clear()
-            for key in self.failure_info.keys():
-                self.failure_info[key].clear()
+        except Exception as e:
+            self.critical_failures['analyze_nodes_failures'].append((str(address), port, str(e)))
+            self.logger.critical(f'[-] Critical: analyze_nodes failure: {e} ({address}:{port})')
 
     async def analyze_node_bus(self, node, address, port):
         """
@@ -245,14 +291,17 @@ class ROSScanner(RobotAdapter):
                                     subscribe_stats_entry['subConnectionData']['connected'] = entry[1][0][4]
                                 node.subscribe_stats.append(subscribe_stats_entry)
                             if service_stats:
-                                node.service_stats.clear()
-                                node.service_stats['numRequests'] = service_stats[0]
-                                node.service_stats['bytesReceived'] = service_stats[1]
-                                node.service_stats['bytesSent'] = service_stats[2]
+                                try:
+                                    node.service_stats.clear()
+                                    node.service_stats['numRequests'] = service_stats[0]
+                                    node.service_stats['bytesReceived'] = service_stats[1]
+                                    node.service_stats['bytesSent'] = service_stats[2]
+                                except Exception as e:
+                                    self.logger.warning(f'[-] Service stats in unexpected format (or is now implemented): {e} ({address}:{port})')
                         else:
                             if self.failures:
                                 self.failure_info['bus_stats_failed_code1s'].append(str(node))
-                            self.logger.critical(f'[-] Expected code 1 when getting bus stats but received code {code}. Terminating ({address}:{port})')
+                            self.logger.warning(f'[-] Expected code 1 when getting bus stats but received code {code}. Terminating ({address}:{port})')
                     except Exception as e:
                         node.stats_unexpected = True
                         node.publish_stats.clear()
@@ -289,7 +338,7 @@ class ROSScanner(RobotAdapter):
                         else:
                             if self.failures:
                                 self.failure_info['bus_info_failed_code1s'].append(str(node))
-                            self.logger.critical(f'[-] Expected code 1 when getting bus info but received code {code}. Terminating ({address}:{port})')
+                            self.logger.warning(f'[-] Expected code 1 when getting bus info but received code {code}. Terminating ({address}:{port})')
                     except Exception as e:
                         node.info_unexpected = True
                         node.connections.clear()
@@ -330,7 +379,7 @@ class ROSScanner(RobotAdapter):
                         else:
                             if self.failures:
                                 self.failure_info['param_names_failed_code1s'].append((str(address), port))
-                            self.logger.critical(f'[-] Expected code 1 when getting param names but received code {code}. Terminating ({address}:{port})')
+                            self.logger.warning(f'[-] Expected code 1 when getting param names but received code {code}. Terminating ({address}:{port})')
                     except Exception as e:
                         ros_host.param_response_unexpected = True
                         self.logger.warning(f'[-] Param names response in unexpected format: {e} ({address}:{port})')
@@ -460,7 +509,7 @@ class ROSScanner(RobotAdapter):
     def scan_pipe_main(self):
         asyncio.get_event_loop().run_until_complete(self.scan_pipe())
 
-    def print_results(self, output_location=sys.stdout):
+    def print_results(self, output_location=sys.stderr):
         """
         Print the information of a ROS system.
         """
@@ -615,16 +664,32 @@ class ROSScanner(RobotAdapter):
         """
         datetime_now = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
         uuid4 = uuid.uuid4().hex
-        if (('output' in format) or ('all' in format)):
-            with open(f'{datetime_now}_{uuid4}.log', 'x') as file:
-                self.print_results(file)
+
+        try:
+            if (('output' in format) or ('all' in format)):
+                with open(f'{datetime_now}_{uuid4}.log', 'x') as file:
+                    self.print_results(file)
+        except Exception as e:
+            self.critical_failures['save_to_file:print_results_failures'].append(([f'{host.address}:{host.port}' for host in self.hosts], str(e)))
+            self.logger.critical(f"[-] Critical: save_to_file:print_results failure: {e} ({[f'{host.address}:{host.port}' for host in self.hosts]})")
+
         if (('json' in format ) or ('JSON' in format) or ('yaml' in format) or ('YAML' in format) or ('all' in format)):
             save_dict = {
                 'hosts': {},
-                'failure_info': self.failure_info
+                'failure_info': self.failure_info,
             }
             for host in self.hosts:
-                save_dict['hosts'][f'{host.address}:{host.port}'] = {'nodes': {}, 'communications': {}, 'services': host.services, 'high_numbered_port_state': host.high_numbered_port_states}
+                save_dict['hosts'][f'{host.address}:{host.port}'] = {
+                    'nodes': {},
+                    'communications': {},
+                    'services': host.services,
+                    'high_numbered_port_state': host.high_numbered_port_states,
+                    'parameter_names': host.parameter_names,
+                    'get_param_names_response': host.get_param_names_response,
+                    'param_response_unexpected': host.param_response_unexpected,
+                    'get_system_state_response': host.get_system_state_response,
+                    'system_state_response_unexpected': host.system_state_response_unexpected
+                }
                 for node in host.nodes:
                     node_dict = copy.deepcopy(node.__dict__)
                     node_dict['published_topics'] = [str(topic) for topic in node_dict['published_topics']]
@@ -638,12 +703,28 @@ class ROSScanner(RobotAdapter):
                     communication_dict['topic'] = str(communication_dict['topic'])
                     save_dict['hosts'][f'{host.address}:{host.port}']['communications'][communication_dict['topic']] = communication_dict
 
-            if (('json' in format) or ('JSON' in format) or ('all' in format)):
-                with open(f'{datetime_now}_{uuid4}.json', 'x') as file:
-                    json.dump(save_dict, file, indent=4)
-            if (('yaml' in format) or ('YAML' in format) or ('all' in format)):
-                with open(f'{datetime_now}_{uuid4}.yaml', 'x') as file:
-                    file.write(yaml.dump(save_dict))
+            save_error = False
+            try:
+                if (('json' in format) or ('JSON' in format) or ('all' in format)):
+                    with open(f'{datetime_now}_{uuid4}.json', 'x') as file:
+                        json.dump(save_dict, file, indent=4)
+            except Exception as e:
+                save_dict['json_error'] = str(e)
+                os.remove(f'{datetime_now}_{uuid4}.json')
+                self.logger.error(f'[-] Error when attempting to save as JSON: {e}; saving as byte stream instead (pickle)')
+                save_error = True
+            try:
+                if (('yaml' in format) or ('YAML' in format) or ('all' in format)):
+                    with open(f'{datetime_now}_{uuid4}.yaml', 'x') as file:
+                        file.write(yaml.dump(save_dict))
+            except Exception as e:
+                save_dict['yaml_error'] = str(e)
+                os.remove(f'{datetime_now}_{uuid4}.yaml')
+                self.logger.error(f'[-] Error when attempting to save as YAML: {e}; saving as byte stream instead (pickle)')
+                save_error = True
+            if save_error:
+                with open(f'{datetime_now}_{uuid4}.bin', 'xb') as file:
+                    pickle.dump(save_dict, file)
 
     def write_to_file(self, out_file):
         """

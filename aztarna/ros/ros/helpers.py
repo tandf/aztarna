@@ -22,6 +22,8 @@ class ROSHost(BaseHostROS):
         self.parameter_names = []
         self.get_param_names_response = []
         self.param_response_unexpected = False
+        self.get_system_state_response = []
+        self.system_state_response_unexpected = False
 
     def __repr__(self):
         if len(self.nodes) == 0:
