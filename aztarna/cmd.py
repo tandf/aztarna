@@ -33,6 +33,7 @@ def main():
     parser.add_argument('-c', '--check', help='Try TCP SYN scan on a high-numbered normally-closed port(s) to check if address may respond to any port (specify number of (random) high-numbered nomrally-closed ports to scan)', default=0, type=int)
     parser.add_argument('-s', '--save', help='Save ROS system information to a new file with unique filename (specify format to save information: output, JSON, YAML, or all; if multiple but not all, separate with commas)', default='none')
     parser.add_argument('-w', '--when', help='When to create output files, only at the end (default) or after every scanned potential host port: (end, every)', default='end')
+    parser.add_argument('-n', '--handle', help='Handle/Catch unexpected critical failure excecptions to allow scan to continue while creating logs of failure(s). Otherwise, if not selected, allow exception to propagate', action='store_true')
     parser.add_argument('-r', '--rate', help='Maximum simultaneous network connections', default=100, type=int)
     parser.add_argument('-d', '--domain', help='ROS 2 DOMAIN ID (ROS_DOMAIN_ID environmental variable). Only applies to ROS 2.', type=int)
     parser.add_argument('--daemon', help='Use rclpy daemon (coming from ros2cli).', action='store_true')
@@ -106,6 +107,7 @@ def main():
         scanner.parameters = args.parameters
         scanner.failures = args.failures
         scanner.check = args.check
+        scanner.handle = args.handle
         scanner.out_file = args.out_file
         scanner.rate = args.rate
         scanner.domain = args.domain
@@ -126,17 +128,9 @@ def main():
                 scanner.write_to_file(args.out_file)
             else:
                 if ('none' not in scanner.save_format):
-                    try:
-                        scanner.save_to_file(scanner.save_format)
-                    except Exception as e:
-                        scanner.critical_failures['save_to_file_failures'].append(([f'{host.address}:{host.port}' for host in scanner.hosts], str(e)))
-                        scanner.logger.critical(f"[-] Critical: save_to_file failure: {e} ({[f'{host.address}:{host.port}' for host in scanner.hosts]})")
+                    scanner.catch_save_to_file(scanner.save_format, address_port=[f'{host.address}:{host.port}' for host in scanner.hosts])
                 elif args.extended is True:
-                    try:
-                        scanner.print_results()
-                    except Exception as e:
-                        scanner.critical_failures['print_results_failures'].append(([f'{host.address}:{host.port}' for host in scanner.hosts], str(e)))
-                        scanner.logger.critical(f"[-] Critical: print_results failure: {e} ({[f'{host.address}:{host.port}' for host in scanner.hosts]})")
+                    scanner.catch_print_results(address_port=[f'{host.address}:{host.port}' for host in scanner.hosts])
 
     except Exception as e:
         logger.critical('Exception occurred during execution')
