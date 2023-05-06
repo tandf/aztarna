@@ -6,6 +6,7 @@ import re
 from argparse import ArgumentParser
 import argcomplete
 import uvloop
+import sys
 
 from aztarna.ros.industrial.scanner import ROSIndustrialScanner
 from aztarna.industrialrouters.scanner import IndustrialRouterAdapter
@@ -33,6 +34,7 @@ def main():
     parser.add_argument('-c', '--check', help='Try TCP SYN scan on a high-numbered normally-closed port(s) to check if address may respond to any port (specify number of (random) high-numbered nomrally-closed ports to scan)', default=0, type=int)
     parser.add_argument('-s', '--save', help='Save ROS system information to a new file with unique filename (specify format to save information: output, JSON, YAML, or all; if multiple but not all, separate with commas)', default='none')
     parser.add_argument('-w', '--when', help='When to create output files, only at the end (default) or after every scanned potential host port: (end, every)', default='end')
+    parser.add_argument('-z', '--stream', help='Specify whether to output program output to stdout (default) or stderr: (stdout, stderr)', default='stdout')
     parser.add_argument('-n', '--handle', help='Handle/Catch unexpected critical failure exceptions to allow scan to continue while creating logs of failure(s). Otherwise, if not selected, allow exception to propagate', action='store_true')
     parser.add_argument('-r', '--rate', help='Maximum simultaneous network connections', default=100, type=int)
     parser.add_argument('-d', '--domain', help='ROS 2 DOMAIN ID (ROS_DOMAIN_ID environmental variable). Only applies to ROS 2.', type=int)
@@ -96,10 +98,17 @@ def main():
             if (entry not in ['none', 'output', 'json', 'JSON', 'yaml', 'YAML', 'all']):
                 logger.critical('Invalid save format selected')
                 return
-        if ((scanner.when == 'end') or (scanner.when == 'every')):
+        if ((args.when == 'end') or (args.when == 'every')):
             scanner.when = args.when
         else:
             logger.critical('Invalid "when" option selected')
+            return
+        if (args.stream == 'stdout'):
+            scanner.stream = sys.stdout
+        elif (args.stream == 'stderr'):
+            scanner.stream = sys.stderr
+        else:
+            logger.critical('Invalid output stream selected')
             return
 
         scanner.extended = args.extended
@@ -130,7 +139,7 @@ def main():
                 if ('none' not in scanner.save_format):
                     scanner.catch_save_to_file(scanner.save_format, address_port=[f'{host.address}:{host.port}' for host in scanner.hosts])
                 elif args.extended is True:
-                    scanner.catch_print_results(address_port=[f'{host.address}:{host.port}' for host in scanner.hosts])
+                    scanner.catch_print_results(output_location=scanner.stream, address_port=[f'{host.address}:{host.port}' for host in scanner.hosts])
 
     except Exception as e:
         logger.critical('Exception occurred during execution')

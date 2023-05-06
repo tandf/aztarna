@@ -228,7 +228,7 @@ class ROSScanner(RobotAdapter):
                 if ('none' not in self.save_format):
                     self.catch_save_to_file(self.save_format, address_port=f'{address}:{port}')
                 elif self.extended:
-                    self.catch_print_results(address_port=f'{address}:{port}')
+                    self.catch_print_results(output_location=self.stream, address_port=f'{address}:{port}')
 
             self.hosts.clear()
             for key in self.failure_info.keys():
@@ -518,7 +518,7 @@ class ROSScanner(RobotAdapter):
     def scan_pipe_main(self):
         asyncio.get_event_loop().run_until_complete(self.scan_pipe())
 
-    def catch_print_results(self, output_location=sys.stderr, address_port=None):
+    def catch_print_results(self, output_location, address_port=None):
         try:
             self.print_results(output_location)
         except Exception as e:

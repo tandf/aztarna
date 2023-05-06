@@ -22,6 +22,7 @@ class RobotAdapter:
         self.handle = handle
         self.check = 0
         self.when = 'end'
+        self.stream = 'stdout'
         self.input = False
         self.out_file = None
         self._rate = 1000
