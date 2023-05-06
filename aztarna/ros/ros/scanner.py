@@ -16,7 +16,7 @@ from aztarna.ros.helpers import HelpersROS
 from aztarna.ros.ros.helpers import Node, Topic, Service
 from aztarna.ros.ros.helpers import ROSHost
 import sys
-from ipaddress import IPv4Address
+from ipaddress import IPv4Address, AddressValueError
 import nmap
 import random
 import datetime
@@ -512,8 +512,13 @@ class ROSScanner(RobotAdapter):
     async def scan_pipe(self):
         async for line in RobotAdapter.stream_as_generator(asyncio.get_event_loop(), sys.stdin):
             str_line = (line.decode()).rstrip('\n')
+            try:
+                address = IPv4Address(str_line)
+            except AddressValueError as e:
+                self.logger.critical(f'[!] Invalid address from pipe: {str_line}')
+                raise e
             for port in self.ports:
-                await self.catch_analyze_nodes(str_line, port)
+                await self.catch_analyze_nodes(address, port)
 
     def scan_pipe_main(self):
         asyncio.get_event_loop().run_until_complete(self.scan_pipe())
