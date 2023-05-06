@@ -18,7 +18,7 @@ def main():
     """
     Main method
     """
-    logging.basicConfig(level=logging.INFO, format="%(name)s - %(message)s")
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     logger = logging.getLogger(__name__)
     parser = ArgumentParser(description='Aztarna, a reconnaissance tool for robots and robot components.')
     parser.add_argument('-t', '--type', help='<ROS/ros/SROS/sros/ROS2/ros2/IROUTERS/irouters> Scan ROS, SROS, ROS2 hosts or Industrial routers', required=True)
@@ -33,7 +33,7 @@ def main():
     parser.add_argument('-c', '--check', help='Try TCP SYN scan on a high-numbered normally-closed port(s) to check if address may respond to any port (specify number of (random) high-numbered nomrally-closed ports to scan)', default=0, type=int)
     parser.add_argument('-s', '--save', help='Save ROS system information to a new file with unique filename (specify format to save information: output, JSON, YAML, or all; if multiple but not all, separate with commas)', default='none')
     parser.add_argument('-w', '--when', help='When to create output files, only at the end (default) or after every scanned potential host port: (end, every)', default='end')
-    parser.add_argument('-n', '--handle', help='Handle/Catch unexpected critical failure excecptions to allow scan to continue while creating logs of failure(s). Otherwise, if not selected, allow exception to propagate', action='store_true')
+    parser.add_argument('-n', '--handle', help='Handle/Catch unexpected critical failure exceptions to allow scan to continue while creating logs of failure(s). Otherwise, if not selected, allow exception to propagate', action='store_true')
     parser.add_argument('-r', '--rate', help='Maximum simultaneous network connections', default=100, type=int)
     parser.add_argument('-d', '--domain', help='ROS 2 DOMAIN ID (ROS_DOMAIN_ID environmental variable). Only applies to ROS 2.', type=int)
     parser.add_argument('--daemon', help='Use rclpy daemon (coming from ros2cli).', action='store_true')
