@@ -34,13 +34,13 @@ class ROSScanner(RobotAdapter):
     def __init__(self):
         super().__init__()
 
-        self.timeout = aiohttp.ClientTimeout(total=3)
+        self.timeout = 3
         self.hosts = []
 
         self.logger = logging.getLogger(__name__)
 
         self.failure_info = {
-            'responses_from_high_numbered_port': [],
+            'responses_from_high_numbered_ports': [],
             'failed_501s': [],
             'host_timeout_failures': [],
             'failed_connections': [],
@@ -121,9 +121,9 @@ class ROSScanner(RobotAdapter):
                         self.failure_info['failed_501s'].append({'address': str(address), 'port': port, 'code': response.status, 'datetime': datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')})
                     self.logger.error(f'[-] Expected error code 501, but received {response.status}. Terminating scan of port ({address}:{port})')
                     return 0
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as e:
             if self.failures:
-                self.failure_info['host_timeout_failures'].append({'address': str(address), 'port': port, 'datetime': datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')})
+                self.failure_info['host_timeout_failures'].append({'address': str(address), 'port': port, 'exception': str(e), 'datetime': datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')})
             self.logger.error(f'[-] Timed out while attempting to connect to potential host port ({address}:{port})')
             return 0
         except Exception as e:
@@ -152,7 +152,7 @@ class ROSScanner(RobotAdapter):
         :param address: address of the ROS master
         :param port: port of the ROS master
         """
-        async with aiohttp.ClientSession(loop=asyncio.get_event_loop(), timeout=self.timeout) as client:
+        async with aiohttp.ClientSession(loop=asyncio.get_event_loop(), timeout=aiohttp.ClientTimeout(total=(len(self.host_list)*len(self.ports)*20))) as client:
             full_host = 'http://' + str(address) + ':' + str(port)
 
             # Perform a TCP SYN scan on high-numbered, normally-closed port(s) to check if address may repsond to any port.
@@ -161,7 +161,7 @@ class ROSScanner(RobotAdapter):
                 # Try HTTP GET / request on port and check for error code 501
                 if await self.check_error_code(full_host, client, address, port) == 1:
 
-                    ros_master_client = ServerProxy(full_host, loop=asyncio.get_event_loop(), client=client)
+                    ros_master_client = ServerProxy(full_host, loop=asyncio.get_event_loop(), client=client, timeout=aiohttp.ClientTimeout(total=self.timeout))
                     ros_host = ROSHost(address, port)
                     ros_host.high_numbered_port_states = high_numbered_ports_result[1]
                     async with self.semaphore:
@@ -202,9 +202,9 @@ class ROSScanner(RobotAdapter):
                                 ros_host.system_state_response_unexpected = True
                                 self.logger.error(f'[-] System state response in unexpected format: {e}. Terminating ({address}:{port})')
 
-                        except asyncio.TimeoutError:
+                        except asyncio.TimeoutError as e:
                             if self.failures:
-                                self.failure_info['get_system_state_timeouts'].append({'address': str(address), 'port': port, 'datetime': datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')})
+                                self.failure_info['get_system_state_timeouts'].append({'address': str(address), 'port': port, 'exception': str(e), 'datetime': datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')})
                             self.logger.error(f'[-] Timed out while attempting to get system state ({address}:{port})')
                         except Exception as e:
                             if self.failures:
@@ -229,10 +229,8 @@ class ROSScanner(RobotAdapter):
                     self.catch_save_to_file(self.save_format, address_port=f'{address}:{port}')
                 elif self.extended:
                     self.catch_print_results(output_location=self.stream, address_port=f'{address}:{port}')
-
-            self.hosts.clear()
-            for key in self.failure_info.keys():
-                self.failure_info[key].clear()
+        
+        self.host_list.remove(address)
 
     async def catch_analyze_node_bus(self, node, address, port):
         try:
@@ -252,9 +250,9 @@ class ROSScanner(RobotAdapter):
         """
         For each node found, extract transport/topic (bus) stats and connection info.
         """
-        async with aiohttp.ClientSession(loop=asyncio.get_event_loop(), timeout=self.timeout) as client:
+        async with aiohttp.ClientSession(loop=asyncio.get_event_loop(), timeout=aiohttp.ClientTimeout(total=(4*self.timeout))) as client:
             xmlrpcuri = 'http://' + str(address) + ':' + str(port)
-            node_client = ServerProxy(xmlrpcuri, loop=asyncio.get_event_loop(), client=client)
+            node_client = ServerProxy(xmlrpcuri, loop=asyncio.get_event_loop(), client=client, timeout=aiohttp.ClientTimeout(total=(2*self.timeout)))
             async with self.semaphore:
                 cant_connect = False
                 try:
@@ -305,9 +303,9 @@ class ROSScanner(RobotAdapter):
                         node.service_stats.clear()
                         self.logger.warning(f'[-] Bus stats response in unexpected format: {e} ({address}:{port})')
 
-                except asyncio.TimeoutError:
+                except asyncio.TimeoutError as e:
                     if self.failures:
-                        self.failure_info['get_bus_stats_timeouts'].append({'node': str(node), 'address': str(address), 'port': port, 'datetime': datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')})
+                        self.failure_info['get_bus_stats_timeouts'].append({'node': str(node), 'address': str(address), 'port': port, 'exception': str(e), 'datetime': datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')})
                     self.logger.error(f'[-] Timed out while attempting to get bus stats ({address}:{port})')
                     cant_connect = True
                 except Exception as e:
@@ -340,9 +338,9 @@ class ROSScanner(RobotAdapter):
                         node.connections.clear()
                         self.logger.warning(f'[-] Bus (connection) info response in unexpected format: {e} ({address}:{port})')
 
-                except asyncio.TimeoutError:
+                except asyncio.TimeoutError as e:
                     if self.failures:
-                        self.failure_info['get_bus_info_timeouts'].append({'node': str(node), 'address': str(address), 'port': port, 'datetime': datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')})
+                        self.failure_info['get_bus_info_timeouts'].append({'node': str(node), 'address': str(address), 'port': port, 'exception': str(e), 'datetime': datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')})
                     self.logger.error(f'[-] Timed out while attempting to get bus info ({address}:{port})')
                     cant_connect = True
                 except Exception as e:
@@ -374,9 +372,9 @@ class ROSScanner(RobotAdapter):
         """
         Extract information about names of parameters stored on the server.
         """
-        async with aiohttp.ClientSession(loop=asyncio.get_event_loop(), timeout=self.timeout) as client:
+        async with aiohttp.ClientSession(loop=asyncio.get_event_loop(), timeout=aiohttp.ClientTimeout(total=self.timeout)) as client:
             xmlrpcuri = 'http://' + str(address) + ':' + str(port)
-            ros_client = ServerProxy(xmlrpcuri, loop=asyncio.get_event_loop(), client=client)
+            ros_client = ServerProxy(xmlrpcuri, loop=asyncio.get_event_loop(), client=client, timeout=aiohttp.ClientTimeout(total=self.timeout))
             async with self.semaphore:
                 try:
                     response = await ros_client.getParamNames('')
@@ -393,9 +391,9 @@ class ROSScanner(RobotAdapter):
                         ros_host.param_response_unexpected = True
                         self.logger.warning(f'[-] Param names response in unexpected format: {e} ({address}:{port})')
 
-                except asyncio.TimeoutError:
+                except asyncio.TimeoutError as e:
                     if self.failures:
-                        self.failure_info['get_param_names_timeouts'].append({'address': str(address), 'port': port, 'datetime': datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')})
+                        self.failure_info['get_param_names_timeouts'].append({'address': str(address), 'port': port, 'exception': str(e), 'datetime': datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')})
                     self.logger.error(f'[-] Timed out while attempting to get param names ({address}:{port})')
                 except Exception as e:
                     if self.failures:
@@ -514,6 +512,7 @@ class ROSScanner(RobotAdapter):
             str_line = (line.decode()).rstrip('\n')
             try:
                 address = IPv4Address(str_line)
+                self.host_list.append(address)
             except AddressValueError as e:
                 self.logger.critical(f'[!] Invalid address from pipe: {str_line}')
                 raise e
@@ -632,7 +631,7 @@ class ROSScanner(RobotAdapter):
         if self.failures:
             if not hasattr(self, 'failure_explanations'):
                 self.failure_explanations = {
-                    'responses_from_high_numbered_port': 'Recieved response from high-numbered normally-closed port',
+                    'responses_from_high_numbered_ports': 'Recieved response from high-numbered normally-closed port',
                     'failed_501s': 'Code returned not 501',
                     'host_timeout_failures': 'Timed out while attempting to connect to host',
                     'failed_connections': 'Connection failed',

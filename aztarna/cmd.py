@@ -7,6 +7,7 @@ from argparse import ArgumentParser
 import argcomplete
 import uvloop
 import sys
+from ipaddress import IPv4Address, AddressValueError
 
 from aztarna.ros.industrial.scanner import ROSIndustrialScanner
 from aztarna.industrialrouters.scanner import IndustrialRouterAdapter
@@ -74,7 +75,16 @@ def main():
             except FileNotFoundError:
                 logger.critical('Input file not found')
         elif args.address:
-            scanner.load_range(args.address)
+            addresses = args.address.split(',')
+            if (len(addresses) <= 1):
+                scanner.load_range(args.address)
+            else:
+                for address in addresses:
+                    try:
+                        scanner.host_list.append(IPv4Address(address))
+                    except AddressValueError as e:
+                        logger.critical(f'Invalid address!: {address}')
+                        raise e
         else:
             if args.type.upper() not in ['ROS2']:
                 pipe = True
