@@ -10,6 +10,7 @@ setup(
     version='1.2.2',
     packages=[
                 'aztarna',
+                'aztarna.utils',
                 'aztarna.ros',
                 'aztarna.ros.ros',
                 'aztarna.ros.sros',
