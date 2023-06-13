@@ -1,4 +1,4 @@
-#! /bin/env python3
+#! /usr/bin/env python3
 
 import sys
 import socket
@@ -8,32 +8,36 @@ import os
 import argparse
 import ipaddress
 import textwrap
-import time
+from typing import List
 
 
-def scan_port(target: str, port: int, timeout: float = 1):
+def scan_port(target: str, port: int, timeout: float):
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        socket.setdefaulttimeout(timeout)
+        s.setblocking(True)
+        s.settimeout(timeout)
 
         # returns an error indicator
         result = s.connect_ex((target, port))
-        s.close()
-        return result
+        if result == 0:
+            s.shutdown(socket.SHUT_RDWR)
+            s.close()
+        return port, result
 
     except Exception as e:
         return e
 
 
-def _scan(targets: list, ports: list) -> list:
-    return [[scan_port(target, port) for port in ports] for target in targets]
+def scan_ports(target: str, ports: List[int], timeout: float = 3):
+    results = [scan_port(target, port, timeout) for port in ports]
+    return target, results
 
 
-def _collect_results(targets, ports, raw_results) -> dict:
+def _collect_results(raw_results) -> dict:
     d = {}
-    for target, target_results in zip(targets, raw_results):
+    for target, target_results in raw_results:
         d[target] = {}
-        for port, result in zip(ports, target_results):
+        for port, result in target_results:
             description = ""
             if result == 0:
                 description = "Open"
@@ -45,19 +49,19 @@ def _collect_results(targets, ports, raw_results) -> dict:
     return d
 
 
-def scan(targets: list, ports: list, processes=12) -> dict:
+def scan_parallel(targets: list, ports: list, processes=12) -> dict:
     results = []
 
     with multiprocessing.Pool(processes=processes) as pool:
         for target in targets:
-            result = pool.apply_async(_scan, ([target], ports))
+            result = pool.apply_async(scan_ports, (target, ports))
             results.append(result)
 
         pool.close()
         pool.join()
 
-    results = [result.get()[0] for result in results]
-    return _collect_results(targets, ports, results)
+    results = [result.get() for result in results]
+    return _collect_results(results)
 
 
 def format_results_str(results) -> list:
@@ -66,6 +70,7 @@ def format_results_str(results) -> list:
         for port, description in r.items():
             results_str.append(f"{target}:{port} {description}")
     return sorted(results_str)
+
 
 def _parse_args():
     parser = argparse.ArgumentParser()
@@ -107,7 +112,7 @@ def scan_and_print(targets, ports):
     print("Scanning started at: " + str(datetime.now()))
 
     try:
-        results = scan(targets, ports)
+        results = scan_parallel(targets, ports)
     except KeyboardInterrupt:
         print("\n Exiting Program !!!!")
         sys.exit()
