@@ -89,3 +89,5 @@ class BaseRobotHost:
     def __init__(self):
         self.address = ''
         self.port = ''
+        self.isHost = True
+        self.nonHostDescription = ''

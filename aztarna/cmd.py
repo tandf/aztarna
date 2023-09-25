@@ -58,18 +58,6 @@ def main():
         else:
             logger.critical('Invalid type selected')
             return
-        if args.input_file:
-            try:
-                scanner.load_from_file(args.input_file)
-            except FileNotFoundError:
-                logger.critical('Input file not found')
-        elif args.address:
-            scanner.load_range(args.address)
-        else:
-            if args.type.upper() not in ['ROS2']:
-                scanner.scan_pipe_main()
-                return
-
 
         # TODO Implement a regex for port argument
         try:
@@ -92,7 +80,27 @@ def main():
             scanner.hidden = True
         if args.passive is True:
             scanner.passive = True
-        scanner.scan()
+
+        if args.input_file:
+            try:
+                scanner.load_from_file(args.input_file)
+                scanner.scan()
+            except FileNotFoundError:
+                logger.critical('Input file not found')
+        elif args.address:
+            scanner.load_range(args.address)
+            scanner.scan()
+        else:
+            if args.type.upper() not in ['ROS2']:
+                scanner.scan_pipe_main()
+                for host in scanner.hosts:
+                    if not host.isHost:
+                        print(host, "Not a host. Reason: " + host.nonHostDescription)
+                        continue
+                    print(host)
+                    print(host.communications)
+                    print(host.services)
+
 
         if args.out_file:
             scanner.write_to_file(args.out_file)

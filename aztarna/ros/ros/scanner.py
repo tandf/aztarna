@@ -15,6 +15,8 @@ from aztarna.commons import RobotAdapter
 from aztarna.ros.helpers import HelpersROS
 from aztarna.ros.ros.helpers import Node, Topic, Service
 from aztarna.ros.ros.helpers import ROSHost
+from aztarna.utils.high_ports import high_port_check
+from aztarna.utils.http_code import http_code
 import sys
 from ipaddress import IPv4Address
 
@@ -30,22 +32,56 @@ class ROSScanner(RobotAdapter):
 
         self.logger = logging.getLogger(__name__)
 
-    async def analyze_nodes(self, address, port):
+    async def analyze_node(self, address, port):
         """
-        Scan a node and gather all its data including topics, services and Communications.
+        Perform checks on the target host, and then scan it only if it passes the check
 
         :param address: address of the ROS master
         :param port: port of the ROS master
         """
+        ros_host = ROSHost(address, port)
+        self.hosts.append(ros_host)
+
+        # Check if the host responds to every port
+        random_ports = [58243, 42345]
+        _, open_ports = await high_port_check(ros_host.address, random_ports,
+                                              rosport=str(ros_host.port))
+        if port not in open_ports:
+            ros_host.isHost = False
+            ros_host.nonHostDescription = str(port) + " is closed."
+            return
+        elif len(open_ports) > 1:
+            ros_host.isHost = False
+            ros_host.nonHostDescription = "Host replies to any port."
+            return
+
+        # Check if the host responds http get with 501 error code
+        _, _, code = await http_code(ros_host.address, ros_host.port)
+        if code != 501:
+            ros_host.isHost = False
+            if code is None:
+                ros_host.nonHostDescription = "Fail to start http get to host."
+            else:
+                ros_host.nonHostDescription = "Host replies " + str(code) + \
+                    " to http get."
+            return
+
+        await self.collect_node(ros_host)
+
+
+    async def collect_node(self, ros_host):
+        """
+        Scan a node and gather all its data including topics, services and Communications.
+
+        :param host: ROS host
+        """
         async with aiohttp.ClientSession(loop=asyncio.get_event_loop(), timeout=self.timeout) as client:
-            full_host = 'http://' + str(address) + ':' + str(port)
+            full_host = 'http://' + str(ros_host.address) + ':' + str(ros_host.port)
             ros_master_client = ServerProxy(full_host, loop=asyncio.get_event_loop(), client=client)
-            ros_host = ROSHost(address, port)
             async with self.semaphore:
                 try:
                     code, msg, val = await ros_master_client.getSystemState('')
                     if code == 1:
-                        self.hosts.append(ros_host)
                         if self.extended:
                             publishers_array = val[0]
                             subscribers_array = val[1]
@@ -69,11 +105,14 @@ class ROSScanner(RobotAdapter):
                         await client.close()
                         self.logger.warning('[+] ROS Host found at {}:{}'.format(ros_host.address, ros_host.port))
                     else:
+                        ros_host.isHost = False
+                        ros_host.nonHostDescription = "Error getting system state."
                         self.logger.critical('[-] Error getting system state. Probably not a ROS Master')
 
                 except Exception as e:
                     # self.logger.error('[-] Error connecting to host ' + str(ros_host.address) + ':' + str(ros_host.port) + ' -> '+str(e) + '\n\tNot a ROS host')
-                    pass  # do not log anything to ensure a clean output
+                    ros_host.isHost = False
+                    ros_host.nonHostDescription = "Error connecting to host."
 
     def extract_nodes(self, source_array, topics, pub_or_sub, host):
         """
@@ -165,7 +204,7 @@ class ROSScanner(RobotAdapter):
             results = []
             for port in self.ports:
                 for address in self.host_list:
-                    results.append(self.analyze_nodes(address, port))
+                    results.append(self.analyze_node(address, port))
 
             for result in await asyncio.gather(*results):
                 pass
@@ -181,10 +220,13 @@ class ROSScanner(RobotAdapter):
         asyncio.get_event_loop().run_until_complete(self.scan_network())
 
     async def scan_pipe(self):
+        tasks = []
         async for line in RobotAdapter.stream_as_generator(asyncio.get_event_loop(), sys.stdin):
             str_line = (line.decode()).rstrip('\n')
             for port in self.ports:
-                await self.analyze_nodes(str_line, port)
+                tasks.append(asyncio.ensure_future(
+                    self.analyze_node(str_line, port)))
+        await asyncio.wait(tasks, loop=asyncio.get_event_loop())
 
     def scan_pipe_main(self):
         asyncio.get_event_loop().run_until_complete(self.scan_pipe())

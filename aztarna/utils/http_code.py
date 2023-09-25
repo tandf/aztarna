@@ -1,43 +1,32 @@
 #! /usr/bin/env python3
 
+import asyncio
 from datetime import datetime
 import argparse
 import ipaddress
 import textwrap
-from getpass import getpass
-
-import asyncio
-import aionmap
-
-sudo_passwd = None
-
-async def scan_host_ports(ip, ports):
-    global sudo_passwd
-    if sudo_passwd is None:
-        sudo_passwd = getpass()
-
-    scanner = aionmap.PortScanner()
-    scan_result = await scanner.scan(ip, ports, '-sS -n', sudo=True,
-                                sudo_passwd=sudo_passwd)
-    if not scan_result.hosts:
-        return ip, []
-    open_ports = [port for port, _ in scan_result.hosts[0].get_open_ports()]
-    return ip, open_ports
+import aiohttp
 
 
-async def high_port_check(ip, random_ports, rosport="11311"):
-    # Scan ros port separately to avoid blocking due to scanning to other ports
-    _, ports1 = await scan_host_ports(ip, rosport)
-    _, ports2 = await scan_host_ports(ip, random_ports)
-    return ip, ports1 + ports2
+async def http_code(ip, port, timeout=5):
+    async with aiohttp.ClientSession(
+            loop=asyncio.get_event_loop(),
+            timeout=aiohttp.ClientTimeout(total=timeout)) as client:
+        try:
+            full_host = 'http://' + str(ip) + ':' + str(port)
+            async with client.get(full_host) as response:
+                response = await client.get(full_host)
+                return ip, port, response.status
+        except:
+            pass
+
+    return ip, port, None
 
 
 def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("-p", "--ports", type=str, default=None,
                         help="List of ports, seperated using \",\"")
-    parser.add_argument("--rosport", action="store_true",
-                        help="Probe ros port (11311) first.")
     parser.add_argument("address", nargs="+", help="List of addresses")
     args = parser.parse_args()
 
@@ -60,20 +49,17 @@ def _parse_args():
             ports.add(port)
         ports = sorted(list(ports))
     else:
-        ports = [58243, 42345]
+        ports = [11311]
 
-    return targets, ports, args.rosport
+    return targets, ports
 
 
 def main():
-    targets, ports, rosport = _parse_args()
-
+    targets, ports = _parse_args()
     # Add Banner
     print("-" * 50)
     print(textwrap.fill("Scanning addresses: " +
           ", ".join(targets), subsequent_indent="\t"))
-    if rosport:
-        print(textwrap.fill("Scanning ROS port 11311"))
     print(textwrap.fill("Scanning ports: " +
           ", ".join([str(p) for p in ports]), subsequent_indent="\t"))
 
@@ -83,12 +69,8 @@ def main():
     start_time = datetime.now()
     print("Scanning started at: " + str(start_time))
     for target in targets:
-        if rosport:
-            tasks.append(asyncio.ensure_future(
-                high_port_check(target, ports)))
-        else:
-            tasks.append(asyncio.ensure_future(
-                scan_host_ports(target, ports)))
+        for port in ports:
+            tasks.append(asyncio.ensure_future(http_code(target, port)))
     loop.run_until_complete(asyncio.gather(*tasks))
 
     end_time = datetime.now()
@@ -97,9 +79,8 @@ def main():
     print("-" * 50)
 
     for task in tasks:
-        ip, open_ports = task.result()
-        print(ip, "open_ports:", open_ports)
-
+        ip, port, code = task.result()
+        print(str(ip) + ":" + str(port) + " code: " + str(code))
 
 
 if __name__ == "__main__":
