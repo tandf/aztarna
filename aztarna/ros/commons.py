@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-import asyncio
-import ipaddress
+import json
 import logging
 from ipaddress import IPv4Address, ip_network
 
@@ -64,3 +63,11 @@ class CommunicationROS:
         self.publishers = []  # Node type
         self.subscribers = []  # Node type
         self.topic = topic # Topic() object
+
+    def __str__(self):
+        return "topic: " + str(self.topic) + \
+                "\npublishers: " + str(self.publishers) + \
+                "\nsubscribers: " + str(self.subscribers)
+
+    def __repr__(self) -> str:
+        return self.__str__()

@@ -6,6 +6,7 @@ ROS Scanner helper module.
 :author Alias Robotics SL (https://aliasrobotics.com)
 """
 from aztarna.ros.commons import BaseNodeROS, BaseNodeROS, BaseServiceROS, BaseHostROS
+import json
 
 class ROSHost(BaseHostROS):
     """
@@ -16,7 +17,7 @@ class ROSHost(BaseHostROS):
         self.address = address
         self.port = port
         self.communications = []
-        self.services = []
+        self.params = {}
 
     def __repr__(self):
         if len(self.nodes) == 0:
@@ -37,6 +38,9 @@ class Node(BaseNodeROS):
     def __str__(self):
         return '{} XMLRPCUri: http://{}:{}'.format(self.name, self.address, self.port)
 
+    def __repr__(self) -> str:
+        return self.__str__()
+
 class Topic(BaseNodeROS):
     """
     Topic class, an extension of BaseNodeROS
@@ -49,6 +53,12 @@ class Topic(BaseNodeROS):
     def __str__(self):
         return self.name + '(Type: ' + self.type + ')'
 
+    def __repr__(self) -> str:
+        return self.__str__()
+
+    def toJSON(self):
+        return self.__str__()
+
 class Service(BaseServiceROS):
     """
     Service class, an extension of BaseServiceROS
@@ -59,3 +69,9 @@ class Service(BaseServiceROS):
 
     def __str__(self):
         return '{}'.format(self.name)
+
+    def __repr__(self) -> str:
+        return self.__str__()
+
+    def toJSON(self):
+        return self.name

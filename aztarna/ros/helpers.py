@@ -15,6 +15,6 @@ class HelpersROS:
             return None
 
         topic_name = array_object[0]
-        node_names = (HelpersLINQ.distinct(array_object[1]))
+        node_names = set(array_object[1])
 
         return [topic_name, node_names]

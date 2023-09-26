@@ -27,6 +27,7 @@ def main():
     parser.add_argument('-i', '--input_file', help='Input file of addresses to use for scanning')
     parser.add_argument('-o', '--out_file', help='Output file for the results')
     parser.add_argument('-e', '--extended', help='Extended scan of the hosts', action='store_true')
+    parser.add_argument('--print', help='Print scan results', action='store_true')
     parser.add_argument('-r', '--rate', help='Maximum simultaneous network connections', default=100, type=int)
     parser.add_argument('-d', '--domain', help='ROS 2 DOMAIN ID (ROS_DOMAIN_ID environmental variable). Only applies to ROS 2.', type=int)
     parser.add_argument('--daemon', help='Use rclpy daemon (coming from ros2cli).', action='store_true')
@@ -66,10 +67,7 @@ def main():
             try:
                 scanner.ports = [int(port) for port in args.ports.split(',')]
             except:
-                try:
                     scanner.ports.append(int(args.ports))
-                except Exception as e:
-                    logger.error('[-] Error: ' + str(e))
 
         scanner.extended = args.extended
         scanner.rate = args.rate
@@ -87,25 +85,18 @@ def main():
                 scanner.scan()
             except FileNotFoundError:
                 logger.critical('Input file not found')
+                raise
         elif args.address:
             scanner.load_range(args.address)
             scanner.scan()
         else:
             if args.type.upper() not in ['ROS2']:
                 scanner.scan_pipe_main()
-                for host in scanner.hosts:
-                    if not host.isHost:
-                        print(host, "Not a host. Reason: " + host.nonHostDescription)
-                        continue
-                    print(host)
-                    print(host.communications)
-                    print(host.services)
-
 
         if args.out_file:
             scanner.write_to_file(args.out_file)
         else:
-            if args.extended is True:
+            if args.extended is True and args.print is True:
                 scanner.print_results()
     except Exception as e:
         logger.critical('Exception occurred during execution')
