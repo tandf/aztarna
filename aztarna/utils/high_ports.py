@@ -17,7 +17,7 @@ async def scan_host_ports(ip, ports):
         sudo_passwd = getpass()
 
     scanner = aionmap.PortScanner()
-    scan_result = await scanner.scan(ip, ports, '-sS -n', sudo=True,
+    scan_result = await scanner.scan(ip, ports, '-sS -n -Pn', sudo=True,
                                 sudo_passwd=sudo_passwd)
     if not scan_result.hosts:
         return ip, []
@@ -34,7 +34,7 @@ async def high_port_check(ip, random_ports, rosport="11311"):
 
 def _parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-p", "--ports", type=str, default=None,
+    parser.add_argument("-p", "--ports", type=str, default="11311",
                         help="List of ports, seperated using \",\"")
     parser.add_argument("--rosport", action="store_true",
                         help="Probe ros port (11311) first.")

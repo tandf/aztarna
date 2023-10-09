@@ -15,7 +15,7 @@ from aztarna.commons import RobotAdapter
 from aztarna.ros.helpers import HelpersROS
 from aztarna.ros.ros.helpers import Node, Topic, Service
 from aztarna.ros.ros.helpers import ROSHost
-from aztarna.utils.high_ports import high_port_check
+from aztarna.utils.high_ports import high_port_check, scan_host_ports
 from aztarna.utils.http_code import http_code
 import sys
 from ipaddress import IPv4Address
@@ -43,18 +43,22 @@ class ROSScanner(RobotAdapter):
         ros_host = ROSHost(address, port)
         self.hosts.append(ros_host)
 
-        # Check if the host responds to every port
-        random_ports = [58243, 42345]
-        _, open_ports = await high_port_check(ros_host.address, random_ports,
-                                              rosport=str(ros_host.port))
-        if port not in open_ports:
-            ros_host.isHost = False
-            ros_host.nonHostDescription = str(port) + " is closed."
-            return
-        elif len(open_ports) > 1:
-            ros_host.isHost = False
-            ros_host.nonHostDescription = "Host replies to any port."
-            return
+        #  # Check if the host responds to every port
+        #  random_ports = [58243]
+        #  #  random_ports = [58243, 42345]
+        #  _, open_ports = await scan_host_ports(ros_host.address, random_ports)
+        #  #  if port not in open_ports:
+            #  #  ros_host.isHost = False
+            #  #  ros_host.nonHostDescription = str(port) + " is closed."
+            #  #  return
+        #  #  elif len(open_ports) > 1:
+            #  #  ros_host.isHost = False
+            #  #  ros_host.nonHostDescription = "Host replies to any port."
+            #  #  return
+        #  if open_ports:
+            #  ros_host.isHost = False
+            #  ros_host.nonHostDescription = "Host replies to any port."
+            #  return
 
         # Check if the host responds http get with 501 error code
         _, _, code = await http_code(ros_host.address, ros_host.port)
@@ -254,11 +258,13 @@ class ROSScanner(RobotAdapter):
     async def scan_pipe(self):
         tasks = []
         async for line in RobotAdapter.stream_as_generator(asyncio.get_event_loop(), sys.stdin):
+            # TODO: Save input addresses to a file
             str_line = (line.decode()).rstrip('\n')
             for port in self.ports:
                 tasks.append(asyncio.ensure_future(
                     self.analyze_node(str_line, port)))
         await asyncio.wait(tasks, loop=asyncio.get_event_loop())
+        print(len([h for h in self.hosts if h.isHost]), "ROS hosts are detected.")
 
     def scan_pipe_main(self):
         asyncio.get_event_loop().run_until_complete(self.scan_pipe())
