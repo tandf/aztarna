@@ -71,3 +71,10 @@ class CommunicationROS:
 
     def __repr__(self) -> str:
         return self.__str__()
+
+    def toJSON(self):
+        return {
+            "publishers": [p.name for p in self.publishers],
+            "subscribers": [s.name for s in self.subscribers],
+            "topic": self.topic,
+        }
